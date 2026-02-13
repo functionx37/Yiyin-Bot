@@ -13,8 +13,7 @@ build/
 venv/
 
 # Environment / Secrets
-.env
-.env.*
+.env.prod
 
 # NapCat runtime data
 napcat/

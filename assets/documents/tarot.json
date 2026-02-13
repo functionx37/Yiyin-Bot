@@ -1,0 +1,156 @@
+[
+  {
+    "id": 0,
+    "name_zh": "愚者",
+    "name_en": "The Fool",
+    "upright": "新的开始、冒险、自由、天真、潜力无限",
+    "reversed": "鲁莽、冒失、不计后果、停滞不前、犹豫不决"
+  },
+  {
+    "id": 1,
+    "name_zh": "魔术师",
+    "name_en": "The Magician",
+    "upright": "创造力、自信、技巧、意志力、新机遇",
+    "reversed": "欺骗、操控、才能浪费、缺乏自信、计划落空"
+  },
+  {
+    "id": 2,
+    "name_zh": "女祭司",
+    "name_en": "The High Priestess",
+    "upright": "直觉、智慧、神秘、内在的声音、潜意识",
+    "reversed": "忽视直觉、表面化、秘密被揭露、信息隐瞒、过度理性"
+  },
+  {
+    "id": 3,
+    "name_zh": "女皇",
+    "name_en": "The Empress",
+    "upright": "丰收、母性、自然、富足、感官享受",
+    "reversed": "依赖他人、创造力受阻、缺乏安全感、过度溺爱、停滞"
+  },
+  {
+    "id": 4,
+    "name_zh": "皇帝",
+    "name_en": "The Emperor",
+    "upright": "权威、领导力、稳定、秩序、父性力量",
+    "reversed": "专制、控制欲强、缺乏纪律、权力滥用、固执己见"
+  },
+  {
+    "id": 5,
+    "name_zh": "教皇",
+    "name_en": "The Hierophant",
+    "upright": "传统、信仰、教导、精神指引、遵循规范",
+    "reversed": "打破常规、教条主义、盲目服从、叛逆、信仰危机"
+  },
+  {
+    "id": 6,
+    "name_zh": "恋人",
+    "name_en": "The Lovers",
+    "upright": "爱情、和谐、选择、价值观一致、灵魂伴侣",
+    "reversed": "关系不和、价值观冲突、选择困难、不忠、自我矛盾"
+  },
+  {
+    "id": 7,
+    "name_zh": "战车",
+    "name_en": "The Chariot",
+    "upright": "胜利、意志力、决心、克服障碍、自律",
+    "reversed": "失去方向、缺乏控制、攻击性、挫败感、内心冲突"
+  },
+  {
+    "id": 8,
+    "name_zh": "力量",
+    "name_en": "Strength",
+    "upright": "勇气、内在力量、耐心、温柔的坚定、自信",
+    "reversed": "软弱、自我怀疑、缺乏勇气、压抑情绪、失去控制"
+  },
+  {
+    "id": 9,
+    "name_zh": "隐士",
+    "name_en": "The Hermit",
+    "upright": "内省、独处、寻找真理、智慧、精神引导",
+    "reversed": "孤立、逃避现实、过度封闭、固执、拒绝帮助"
+  },
+  {
+    "id": 10,
+    "name_zh": "命运之轮",
+    "name_en": "Wheel of Fortune",
+    "upright": "命运转折、好运降临、机遇、变化、周期循环",
+    "reversed": "厄运、抗拒变化、运势低迷、失去控制、重复旧错"
+  },
+  {
+    "id": 11,
+    "name_zh": "正义",
+    "name_en": "Justice",
+    "upright": "公正、真相、因果报应、法律事务、理性判断",
+    "reversed": "不公正、逃避责任、偏见、不诚实、法律纠纷"
+  },
+  {
+    "id": 12,
+    "name_zh": "倒吊人",
+    "name_en": "The Hanged Man",
+    "upright": "牺牲、换个角度看问题、等待、放下执念、顿悟",
+    "reversed": "拖延、无谓的牺牲、固执不变、抗拒放手、白费力气"
+  },
+  {
+    "id": 13,
+    "name_zh": "死神",
+    "name_en": "Death",
+    "upright": "结束与新生、重大转变、告别过去、蜕变、放下",
+    "reversed": "抗拒改变、恐惧结束、停滞不前、依恋过去、无法释怀"
+  },
+  {
+    "id": 14,
+    "name_zh": "节制",
+    "name_en": "Temperance",
+    "upright": "平衡、和谐、适度、耐心、融合调和",
+    "reversed": "失衡、过度放纵、缺乏耐心、冲突、极端行为"
+  },
+  {
+    "id": 15,
+    "name_zh": "恶魔",
+    "name_en": "The Devil",
+    "upright": "束缚、欲望、物质主义、诱惑、执迷不悟",
+    "reversed": "解脱束缚、重获自由、面对阴暗面、打破依赖、觉醒"
+  },
+  {
+    "id": 16,
+    "name_zh": "塔",
+    "name_en": "The Tower",
+    "upright": "突变、灾难、觉醒、崩塌、真相揭露",
+    "reversed": "恐惧改变、勉强维持、逃避灾难、内心动荡、延迟崩溃"
+  },
+  {
+    "id": 17,
+    "name_zh": "星星",
+    "name_en": "The Star",
+    "upright": "希望、灵感、宁静、信念、心灵治愈",
+    "reversed": "失去希望、悲观消极、缺乏信心、创意枯竭、与内心脱节"
+  },
+  {
+    "id": 18,
+    "name_zh": "月亮",
+    "name_en": "The Moon",
+    "upright": "幻觉、恐惧、潜意识、迷惘、直觉",
+    "reversed": "走出迷茫、恢复清明、释放恐惧、真相大白、自我欺骗减少"
+  },
+  {
+    "id": 19,
+    "name_zh": "太阳",
+    "name_en": "The Sun",
+    "upright": "快乐、成功、活力、乐观、光明前途",
+    "reversed": "暂时受挫、过度乐观、自负、快乐延迟、缺乏热情"
+  },
+  {
+    "id": 20,
+    "name_zh": "审判",
+    "name_en": "Judgement",
+    "upright": "觉醒、反思、重生、召唤、最终审判",
+    "reversed": "自我怀疑、拒绝反省、害怕改变、错失机会、逃避审视"
+  },
+  {
+    "id": 21,
+    "name_zh": "世界",
+    "name_en": "The World",
+    "upright": "完成、圆满、成就、旅程结束、整合统一",
+    "reversed": "未完成、缺乏结束感、拖延完成、追求完美、功亏一篑"
+  }
+]

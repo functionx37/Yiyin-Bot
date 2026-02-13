@@ -1,0 +1,10 @@
+[
+    {
+        "command":"/help",
+        "description":"生成帮助菜单"
+    },
+    {
+        "command":"/抽塔罗牌",
+        "description":"随机抽取一张塔罗牌"
+    }
+]

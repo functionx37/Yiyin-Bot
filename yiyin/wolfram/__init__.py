@@ -4,8 +4,10 @@ NoneBot2 WolframAlpha 数学问题求解插件
 - 功能：调用 WolframAlpha Full Results API，以合并转发消息返回解答
 """
 
+import os
+
 import httpx
-from nonebot import on_command, get_driver
+from nonebot import on_command
 from nonebot.adapters.onebot.v11 import (
     Bot,
     MessageEvent,
@@ -16,7 +18,7 @@ from nonebot.adapters.onebot.v11 import (
 from nonebot.params import CommandArg
 
 # ==================== 配置 ====================
-WOLFRAM_APPID: str = getattr(get_driver().config, "wolfram_appid", "")
+WOLFRAM_APPID: str = os.environ.get("WOLFRAM_APPID", "")
 WOLFRAM_API = "https://api.wolframalpha.com/v2/query"
 
 # ==================== 注册命令 ====================

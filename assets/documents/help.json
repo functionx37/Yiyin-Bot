@@ -6,5 +6,21 @@
     {
         "command":"/抽塔罗牌",
         "description":"随机抽取一张塔罗牌"
+    },
+    {
+        "command":"/新增群友 <昵称>",
+        "description":"新增一个要记录语录的群友"
+    },
+    {
+        "command":"/群友列表",
+        "description":"查看本群全部被记录的群友"
+    },
+    {
+        "command":"/上传 <昵称> [图片]",
+        "description":"上传一条群友的发言截图"
+    },
+    {
+        "command":"/看 <昵称>",
+        "description":"随机查看一条群友的语录截图"
     }
 ]

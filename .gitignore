@@ -32,6 +32,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Bot runtime data
+data/
+
 # Docker runtime data
 napcat/data/
 napcat/config/

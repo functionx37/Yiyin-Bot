@@ -16,6 +16,7 @@ Python包依赖使用 **uv** 进行管理。
     ```
 3. 登录 QQ（首次需要）
     * 打开浏览器访问 `<your-IP>:6099/webui`
+    * 获取Token： `docker logs yiyin-napcat 2>&1 | grep -i token`
     * 进入网络配置，添加一个 WebSocket 客户端（反向 WS）
     * URL：`ws://nonebot:8080/onebot/v11/ws`
     * Token：`.env.prod` 中设置的 `ONEBOT_ACCESS_TOKEN`

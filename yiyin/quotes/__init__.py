@@ -4,6 +4,7 @@ NoneBot2 群友语录插件
 - 命令：/群友列表
 - 命令：/上传 <群友昵称> [图片]
 - 命令：/查看 <群友昵称>
+- 命令：/随机群友
 - 功能：记录并随机查看群友的发言截图
 """
 
@@ -60,6 +61,7 @@ add_member_cmd = on_command("新增群友", priority=10, block=True)
 list_members_cmd = on_command("群友列表", priority=10, block=True)
 upload_cmd = on_command("上传", priority=10, block=True)
 view_cmd = on_command("查看", priority=10, block=True)
+random_member_cmd = on_command("随机群友", priority=10, block=True)
 
 
 # ==================== 命令处理 ====================
@@ -94,7 +96,12 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
             "本群还没有记录任何群友，使用 /新增群友 <昵称> 来添加吧"
         )
 
-    member_list = "\n".join(f"  {i + 1}. {name}" for i, name in enumerate(members))
+    lines = []
+    for i, name in enumerate(members):
+        image_dir = _get_member_image_dir(group_id, name)
+        count = len(list(image_dir.glob("*.*"))) if image_dir.exists() else 0
+        lines.append(f"  {i + 1}. {name}：{count}条")
+    member_list = "\n".join(lines)
     await list_members_cmd.finish(f"本群已记录的群友：\n{member_list}")
 
 
@@ -185,3 +192,37 @@ async def handle_view(
         image_bytes
     )
     await view_cmd.finish(msg)
+
+
+@random_member_cmd.handle()
+async def handle_random_member(bot: Bot, event: GroupMessageEvent):
+    """处理 /随机群友 命令：从全部群友语录中随机抽取一条"""
+    group_id = str(event.group_id)
+    members = _load_members(group_id)
+
+    if not members:
+        await random_member_cmd.finish(
+            "本群还没有记录任何群友，使用 /新增群友 <昵称> 来添加吧"
+        )
+
+    # 收集所有群友的语录图片，记录 (群友名, 图片路径)
+    all_quotes: list[tuple[str, Path]] = []
+    for name in members:
+        image_dir = _get_member_image_dir(group_id, name)
+        if image_dir.exists():
+            for img_file in image_dir.glob("*.*"):
+                all_quotes.append((name, img_file))
+
+    if not all_quotes:
+        await random_member_cmd.finish(
+            "本群还没有任何语录记录，使用 /上传 <昵称> [图片] 来添加吧"
+        )
+
+    # 随机抽取一条
+    chosen_name, chosen_file = random.choice(all_quotes)
+    image_bytes = chosen_file.read_bytes()
+
+    msg = MessageSegment.text(
+        f"随机抽到了群友「{chosen_name}」的语录：\n"
+    ) + MessageSegment.image(image_bytes)
+    await random_member_cmd.finish(msg)

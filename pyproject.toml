@@ -8,6 +8,7 @@ dependencies = [
     "nonebot2[fastapi,httpx,websockets]>=2.4.4",
     "nonebot-adapter-onebot>=2.4.6",
     "pillow>=12.1.1",
+    "nonebot-plugin-memes>=0.8.1",
 ]
 
 [tool.nonebot]
@@ -22,3 +23,4 @@ nonebot-adapter-onebot = [
 
 [tool.nonebot.plugins]
 "@local" = []
+nonebot_plugin_memes = ["nonebot_plugin_memes"]

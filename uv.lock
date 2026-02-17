@@ -59,6 +59,18 @@ wheels = [
 ]
 
 [[package]]
+name = "apscheduler"
+version = "3.11.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzlocal" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/12/3e4389e5920b4c1763390c6d371162f3784f86f85cd6d6c1bfe68eef14e2/apscheduler-3.11.2.tar.gz", hash = "sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41", size = 108683, upload-time = "2025-12-22T00:39:34.884Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/64/2e54428beba8d9992aa478bb8f6de9e4ecaa5f8f513bcfd567ed7fb0262d/apscheduler-3.11.2-py3-none-any.whl", hash = "sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d", size = 64439, upload-time = "2025-12-22T00:39:33.303Z" },
+]
+
+[[package]]
 name = "arclet-alconna"
 version = "1.8.43"
 source = { registry = "https://pypi.org/simple" }
@@ -983,6 +995,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c6/70/4ac2a8d7a11ce59de141b0ad272cae2817517a965e7b952e73de523a08b6/nonebot_plugin_alconna-0.60.4.tar.gz", hash = "sha256:ca1c91d7c4f52e0158b5dc12484722b65f0f4fd339b140cb39d3f2460720772a", size = 158853, upload-time = "2026-01-09T08:56:02.558Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b8/0a/b92a30401bb9dc1976fbf728d920fc002ed294dfa45d362208f64c89a494/nonebot_plugin_alconna-0.60.4-py3-none-any.whl", hash = "sha256:6194cb4b8d44e5a0be5fa6fdca8ba3f1dfae8dd3021ed8ee39fa673bcaae22e9", size = 218404, upload-time = "2026-01-09T08:56:01.514Z" },
+]
+
+[[package]]
+name = "nonebot-plugin-apscheduler"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "apscheduler" },
+    { name = "nonebot2" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d6/53/019bfea58c506c0166d8ef77959fd8676019469d0d3d8e135ae8f1a4b772/nonebot_plugin_apscheduler-0.5.0.tar.gz", hash = "sha256:6c0230e99765f275dc83d6639ff33bd6f71203fa10cd1b8a204b0f95530cda86", size = 3816, upload-time = "2024-06-28T13:17:10.57Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fb/f4/8a3334dcd91e368d2f4e2b21f4805ac70b5dd8a1f9dac94fea5269e82bd3/nonebot_plugin_apscheduler-0.5.0-py3-none-any.whl", hash = "sha256:8b99b5ee60c4bc195d4df2fd27dab3d6963691e3332f6cee31a06eb4277c307f", size = 4307, upload-time = "2024-06-28T13:17:09.593Z" },
 ]
 
 [[package]]
@@ -1955,6 +1981,18 @@ wheels = [
 ]
 
 [[package]]
+name = "tzlocal"
+version = "5.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761, upload-time = "2025-03-05T21:17:41.549Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/14/e2a54fabd4f08cd7af1c07030603c3356b74da07f7cc056e600436edfa17/tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d", size = 18026, upload-time = "2025-03-05T21:17:39.857Z" },
+]
+
+[[package]]
 name = "uc-micro-py"
 version = "1.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -2378,6 +2416,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "nb-cli" },
     { name = "nonebot-adapter-onebot" },
+    { name = "nonebot-plugin-apscheduler" },
     { name = "nonebot-plugin-memes" },
     { name = "nonebot-plugin-orm", extra = ["default"] },
     { name = "nonebot2", extra = ["fastapi", "httpx", "websockets"] },
@@ -2388,6 +2427,7 @@ dependencies = [
 requires-dist = [
     { name = "nb-cli", specifier = ">=1.4.2" },
     { name = "nonebot-adapter-onebot", specifier = ">=2.4.6" },
+    { name = "nonebot-plugin-apscheduler", specifier = ">=0.5.0" },
     { name = "nonebot-plugin-memes", specifier = ">=0.8.1" },
     { name = "nonebot-plugin-orm", extras = ["default"], specifier = ">=0.8.3" },
     { name = "nonebot2", extras = ["fastapi", "httpx", "websockets"], specifier = ">=2.4.4" },

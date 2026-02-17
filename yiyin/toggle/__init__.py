@@ -46,6 +46,7 @@ PLUGIN_REGISTRY: dict[str, str] = {
 # value: 用户可见的中文功能名
 OPTIN_REGISTRY: dict[str, str] = {
     "world_notify": "世界通知",
+    "mohe": "摩诃",
 }
 
 # 反向映射：中文功能名 -> 模块名 / 功能标识（用于命令参数解析）

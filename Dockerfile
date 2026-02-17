@@ -28,4 +28,4 @@ ENV MEME_HOME=/app/data/meme_generator
 # NoneBot 默认端口
 EXPOSE 8080
 
-CMD ["sh", "-c", "mkdir -p $MEME_HOME && cp -n config/meme_generator.toml $MEME_HOME/config.toml && uv run nb orm upgrade && uv run python bot.py"]
+CMD ["sh", "-c", "mkdir -p $MEME_HOME && cp config/meme_generator.toml $MEME_HOME/config.toml && uv run nb orm upgrade && uv run python bot.py"]

@@ -3,7 +3,7 @@ NoneBot2 群友语录插件
 - 命令：/新增群友 <群友昵称>
 - 命令：/群友列表
 - 命令：/上传 <群友昵称> [图片]
-- 命令：/看 <群友昵称>
+- 命令：/查看 <群友昵称>
 - 功能：记录并随机查看群友的发言截图
 """
 
@@ -59,7 +59,7 @@ def _save_members(group_id: str, members: list[str]) -> None:
 add_member_cmd = on_command("新增群友", priority=10, block=True)
 list_members_cmd = on_command("群友列表", priority=10, block=True)
 upload_cmd = on_command("上传", priority=10, block=True)
-view_cmd = on_command("看", priority=10, block=True)
+view_cmd = on_command("查看", priority=10, block=True)
 
 
 # ==================== 命令处理 ====================
@@ -152,10 +152,10 @@ async def handle_upload(
 async def handle_view(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /看 命令"""
+    """处理 /查看 命令"""
     name = args.extract_plain_text().strip()
     if not name:
-        await view_cmd.finish("请输入群友昵称，例如：/看 小明")
+        await view_cmd.finish("请输入群友昵称，例如：/查看 小明")
 
     group_id = str(event.group_id)
     members = _load_members(group_id)

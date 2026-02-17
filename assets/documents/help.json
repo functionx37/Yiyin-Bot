@@ -20,7 +20,7 @@
         "description":"上传一条群友的发言截图"
     },
     {
-        "command":"/看 <昵称>",
+        "command":"/查看 <昵称>",
         "description":"随机查看一条群友的语录截图"
     },
     {
@@ -30,5 +30,17 @@
     {
         "command":"/算 <问题描述>",
         "description":"调用 WolframAlpha 求解数学问题，返回图片结果"
+    },
+    {
+        "command":"/功能列表",
+        "description":"查看本群所有功能的启用/禁用状态"
+    },
+    {
+        "command":"/启用 <功能名>",
+        "description":"在本群启用指定功能（仅管理员/群主）"
+    },
+    {
+        "command":"/禁用 <功能名>",
+        "description":"在本群禁用指定功能（仅管理员/群主）"
     }
 ]

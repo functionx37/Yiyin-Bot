@@ -1,7 +1,7 @@
 """
 NoneBot2 塔罗牌插件
 - 命令：/抽塔罗牌  — 随机抽取大阿卡纳塔罗牌（0-21），随机正位/逆位，发送图文消息
-- 命令：/抽十次    — 一次性抽取 10 张塔罗牌，精简输出，每用户每天限用一次
+- 命令：/抽十连    — 一次性抽取 10 张塔罗牌，精简输出，每用户每天限用一次
 """
 
 import json
@@ -27,13 +27,13 @@ with open(TAROT_JSON_PATH, "r", encoding="utf-8") as f:
 # 构建 id -> 卡牌数据 的映射，方便快速查询
 TAROT_MAP: dict[int, dict] = {card["id"]: card for card in TAROT_DATA}
 
-# ==================== 每日使用记录（抽十次） ====================
+# ==================== 每日使用记录（抽十连） ====================
 # key: user_id (str), value: 上次使用的日期
 _ten_draw_usage: dict[str, date] = {}
 
 # ==================== 注册命令 ====================
 tarot_cmd = on_command("抽塔罗牌", aliases=set(), priority=10, block=True)
-tarot_ten_cmd = on_command("抽十次", aliases=set(), priority=10, block=True)
+tarot_ten_cmd = on_command("抽十连", aliases=set(), priority=10, block=True)
 
 
 @tarot_cmd.handle()
@@ -83,7 +83,7 @@ async def handle_tarot(bot: Bot, event: MessageEvent):
 
 @tarot_ten_cmd.handle()
 async def handle_tarot_ten(bot: Bot, event: MessageEvent):
-    """处理 /抽十次 命令：一次抽 10 张，精简输出，每用户每天限一次"""
+    """处理 /抽十连 命令：一次抽 10 张，精简输出，每用户每天限一次"""
 
     user_id = event.get_user_id()
     today = date.today()

@@ -5,7 +5,9 @@ NoneBot2 对称图片插件
 - 支持回复图片消息进行对称处理
 """
 
+import asyncio
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 
@@ -19,6 +21,16 @@ from nonebot.params import CommandArg
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 TEMP_DIR = PROJECT_ROOT / "data" / "symmetric" / "temp"
 
+# ==================== 资源限制 ====================
+MAX_IMAGE_PIXELS = 4_000_000  # 单帧最大像素数（约 2000×2000）
+MAX_GIF_FRAMES = 80           # 动图最大帧数
+MAX_CONCURRENT = 1            # 最大并发图片处理数
+QUEUE_TIMEOUT = 10            # 等待队列超时（秒）
+PROCESS_TIMEOUT = 30          # 单次处理超时（秒）
+
+_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="symmetric")
+
 # ==================== 注册命令 ====================
 symmetric_cmd = on_command("对称", priority=10, block=True)
 
@@ -28,6 +40,16 @@ DEFAULT_DIRECTION = "左"
 
 
 # ==================== 图片处理核心 ====================
+def _downscale_if_needed(img: Image.Image) -> Image.Image:
+    """如果图片像素数超限，按比例缩小以降低 CPU 负载"""
+    w, h = img.size
+    if w * h > MAX_IMAGE_PIXELS:
+        scale = (MAX_IMAGE_PIXELS / (w * h)) ** 0.5
+        new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+        return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    return img
+
+
 def _apply_symmetric(img: Image.Image, direction: str) -> Image.Image:
     """对单帧 RGBA 图片应用对称操作
 
@@ -81,6 +103,7 @@ def _process_static(img: Image.Image, direction: str) -> bytes:
     if img.mode != "RGBA":
         img = img.convert("RGBA")
 
+    img = _downscale_if_needed(img)
     result = _apply_symmetric(img, direction)
 
     buf = BytesIO()
@@ -92,8 +115,15 @@ def _process_static(img: Image.Image, direction: str) -> bytes:
 def _process_animated(img: Image.Image, direction: str) -> bytes:
     """处理动图（GIF / APNG / 动态 WebP），输出 GIF 格式
 
-    流程：逐帧提取 → RGBA 对称处理 → 转 P 模式（保留透明）→ 合成 GIF
+    流程：检查帧数 → 逐帧提取 → 缩放 → RGBA 对称处理 → 转 P 模式 → 合成 GIF
     """
+    n_frames = getattr(img, "n_frames", 1)
+    if n_frames > MAX_GIF_FRAMES:
+        raise ValueError(
+            f"动图帧数过多（{n_frames} 帧，上限 {MAX_GIF_FRAMES} 帧），"
+            "请使用更短的动图"
+        )
+
     frames: list[Image.Image] = []
     durations: list[int] = []
 
@@ -104,6 +134,7 @@ def _process_animated(img: Image.Image, direction: str) -> bytes:
         durations.append(duration)
 
         rgba_frame = frame.convert("RGBA")
+        rgba_frame = _downscale_if_needed(rgba_frame)
         processed = _apply_symmetric(rgba_frame, direction)
         frames.append(processed)
 
@@ -136,6 +167,21 @@ def _process_animated(img: Image.Image, direction: str) -> bytes:
     )
     buf.seek(0)
     return buf.getvalue()
+
+
+def _do_process(image_bytes: bytes, direction: str) -> bytes:
+    """在工作线程中执行的同步图片处理入口"""
+    try:
+        img = Image.open(BytesIO(image_bytes))
+    except UnidentifiedImageError:
+        raise ValueError("无法识别的图片格式，请发送 PNG、JPG 或 GIF 图片")
+
+    with img:
+        is_animated = getattr(img, "is_animated", False)
+        if is_animated:
+            return _process_animated(img, direction)
+        else:
+            return _process_static(img, direction)
 
 
 # ==================== 辅助函数 ====================
@@ -198,24 +244,30 @@ async def handle_symmetric(
         temp_path.unlink(missing_ok=True)
         await symmetric_cmd.finish("图片下载失败，请稍后重试")
 
-    # 4. 打开并处理图片
+    # 4. 获取并发信号量（避免多个图片处理任务同时运行压垮 CPU）
     try:
-        with Image.open(temp_path) as img:
-            is_animated = getattr(img, "is_animated", False)
-
-            if is_animated:
-                result_bytes = _process_animated(img, direction)
-            else:
-                result_bytes = _process_static(img, direction)
-    except UnidentifiedImageError:
+        await asyncio.wait_for(_semaphore.acquire(), timeout=QUEUE_TIMEOUT)
+    except asyncio.TimeoutError:
         temp_path.unlink(missing_ok=True)
-        await symmetric_cmd.finish("无法识别的图片格式，请发送 PNG、JPG 或 GIF 图片")
+        await symmetric_cmd.finish("当前有其他图片正在处理中，请稍后再试")
+
+    # 5. 在线程池中处理图片（不阻塞事件循环）
+    try:
+        image_bytes = temp_path.read_bytes()
+        loop = asyncio.get_running_loop()
+        result_bytes = await asyncio.wait_for(
+            loop.run_in_executor(_executor, _do_process, image_bytes, direction),
+            timeout=PROCESS_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        await symmetric_cmd.finish("图片处理超时，请使用较小的图片或更短的动图")
+    except ValueError as e:
+        await symmetric_cmd.finish(str(e))
     except Exception as e:
-        temp_path.unlink(missing_ok=True)
         await symmetric_cmd.finish(f"图片处理失败：{e}")
-
-    # 5. 删除临时文件
-    temp_path.unlink(missing_ok=True)
+    finally:
+        _semaphore.release()
+        temp_path.unlink(missing_ok=True)
 
     # 6. 发送对称图片
     await symmetric_cmd.finish(MessageSegment.image(result_bytes))

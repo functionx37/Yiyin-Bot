@@ -22,6 +22,9 @@ RUN uv sync --frozen --no-dev
 # 复制项目文件
 COPY . .
 
+# meme-generator 资源存储路径（持久化到挂载卷）
+ENV MEME_HOME=/app/data/meme_generator
+
 # NoneBot 默认端口
 EXPOSE 8080
 

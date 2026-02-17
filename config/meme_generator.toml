@@ -1,0 +1,3 @@
+[resource]
+# 默认 cdn.jsdelivr.net 国内访问不稳定，使用 gcore 镜像节点
+resource_url = "https://gcore.jsdelivr.net/gh/MemeCrafters/meme-generator-rs@"

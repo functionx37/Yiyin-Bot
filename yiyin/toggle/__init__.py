@@ -4,6 +4,9 @@ NoneBot2 功能开关管理插件
 - 命令：/启用 <功能名>   — 在当前群启用指定功能（仅管理员/群主）
 - 命令：/禁用 <功能名>   — 在当前群禁用指定功能（仅管理员/群主）
 - 原理：通过 run_preprocessor 全局拦截，对已禁用的插件直接忽略
+- 支持两种功能类型：
+  - 插件级功能（默认启用，可禁用）
+  - Opt-in 功能（默认关闭，需手动启用）
 """
 
 import json
@@ -27,7 +30,7 @@ from nonebot.permission import SUPERUSER
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = PROJECT_ROOT / "data" / "toggle" / "config.json"
 
-# ==================== 插件注册表 ====================
+# ==================== 插件注册表（默认启用，可禁用） ====================
 # key: 插件模块名（yiyin/ 下的目录名）
 # value: 用户可见的中文功能名
 # 新增插件时，在此处添加一行即可纳入开关管理
@@ -38,8 +41,16 @@ PLUGIN_REGISTRY: dict[str, str] = {
     "wolfram": "数学求解",
 }
 
-# 反向映射：中文功能名 -> 模块名（用于命令参数解析）
+# ==================== Opt-in 功能注册表（默认关闭，需手动启用） ====================
+# key: 功能标识（供其他插件查询）
+# value: 用户可见的中文功能名
+OPTIN_REGISTRY: dict[str, str] = {
+    "world_notify": "世界通知",
+}
+
+# 反向映射：中文功能名 -> 模块名 / 功能标识（用于命令参数解析）
 _DISPLAY_TO_MODULE: dict[str, str] = {v: k for k, v in PLUGIN_REGISTRY.items()}
+_DISPLAY_TO_OPTIN: dict[str, str] = {v: k for k, v in OPTIN_REGISTRY.items()}
 
 # 本插件名称，不可被禁用
 _SELF_PLUGIN = "toggle"
@@ -77,6 +88,18 @@ def _is_disabled(plugin_key: str, group_id: str) -> bool:
     config = _load_config()
     disabled_list = config.get("disabled", {}).get(group_id, [])
     return plugin_key in disabled_list
+
+
+def is_feature_enabled(feature_key: str, group_id: str) -> bool:
+    """检查指定 opt-in 功能是否在指定群已启用（默认关闭）
+
+    供其他插件调用，例如：
+        from yiyin.toggle import is_feature_enabled
+        if is_feature_enabled("world_notify", group_id): ...
+    """
+    config = _load_config()
+    enabled_list = config.get("enabled", {}).get(group_id, [])
+    return feature_key in enabled_list
 
 
 def _get_plugin_key(matcher: Matcher) -> str | None:
@@ -138,10 +161,14 @@ async def handle_list(bot: Bot, event: GroupMessageEvent):
     group_id = str(event.group_id)
     config = _load_config()
     disabled = config.get("disabled", {}).get(group_id, [])
+    enabled = config.get("enabled", {}).get(group_id, [])
 
     lines = ["「本群功能状态」", ""]
     for key, display_name in PLUGIN_REGISTRY.items():
         status = "❌ 已禁用" if key in disabled else "✅ 已启用"
+        lines.append(f"  {display_name}  {status}")
+    for key, display_name in OPTIN_REGISTRY.items():
+        status = "✅ 已启用" if key in enabled else "❌ 已禁用"
         lines.append(f"  {display_name}  {status}")
 
     lines.append("")
@@ -159,27 +186,36 @@ async def handle_enable(
     """处理 /启用 命令：在当前群启用指定功能"""
     name = args.extract_plain_text().strip()
     if not name:
-        available = "、".join(PLUGIN_REGISTRY.values())
-        await enable_cmd.finish(f"请指定要启用的功能名，可用功能：{available}")
+        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
+        await enable_cmd.finish(f"请指定要启用的功能名，可用功能：{'、'.join(all_names)}")
 
     module_key = _DISPLAY_TO_MODULE.get(name)
-    if module_key is None:
-        available = "、".join(PLUGIN_REGISTRY.values())
-        await enable_cmd.finish(f"未知功能「{name}」，可用功能：{available}")
+    optin_key = _DISPLAY_TO_OPTIN.get(name)
+
+    if module_key is None and optin_key is None:
+        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
+        await enable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(all_names)}")
 
     group_id = str(event.group_id)
     config = _load_config()
-    disabled = config.get("disabled", {}).get(group_id, [])
 
-    if module_key not in disabled:
-        await enable_cmd.finish(f"功能「{name}」在本群已经是启用状态")
-
-    disabled.remove(module_key)
-    if not disabled:
-        # 该群没有禁用项了，清理空列表
-        config["disabled"].pop(group_id, None)
+    if module_key:
+        # 插件级功能：从 disabled 列表中移除
+        disabled = config.get("disabled", {}).get(group_id, [])
+        if module_key not in disabled:
+            await enable_cmd.finish(f"功能「{name}」在本群已经是启用状态")
+        disabled.remove(module_key)
+        if not disabled:
+            config["disabled"].pop(group_id, None)
+        else:
+            config["disabled"][group_id] = disabled
     else:
-        config["disabled"][group_id] = disabled
+        # Opt-in 功能：添加到 enabled 列表
+        enabled = config.setdefault("enabled", {}).setdefault(group_id, [])
+        if optin_key in enabled:
+            await enable_cmd.finish(f"功能「{name}」在本群已经是启用状态")
+        enabled.append(optin_key)
+
     _save_config(config)
 
     await enable_cmd.finish(f"已在本群启用功能「{name}」✓")
@@ -192,22 +228,36 @@ async def handle_disable(
     """处理 /禁用 命令：在当前群禁用指定功能"""
     name = args.extract_plain_text().strip()
     if not name:
-        available = "、".join(PLUGIN_REGISTRY.values())
-        await disable_cmd.finish(f"请指定要禁用的功能名，可用功能：{available}")
+        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
+        await disable_cmd.finish(f"请指定要禁用的功能名，可用功能：{'、'.join(all_names)}")
 
     module_key = _DISPLAY_TO_MODULE.get(name)
-    if module_key is None:
-        available = "、".join(PLUGIN_REGISTRY.values())
-        await disable_cmd.finish(f"未知功能「{name}」，可用功能：{available}")
+    optin_key = _DISPLAY_TO_OPTIN.get(name)
+
+    if module_key is None and optin_key is None:
+        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
+        await disable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(all_names)}")
 
     group_id = str(event.group_id)
     config = _load_config()
-    disabled = config.setdefault("disabled", {}).setdefault(group_id, [])
 
-    if module_key in disabled:
-        await disable_cmd.finish(f"功能「{name}」在本群已经是禁用状态")
+    if module_key:
+        # 插件级功能：添加到 disabled 列表
+        disabled = config.setdefault("disabled", {}).setdefault(group_id, [])
+        if module_key in disabled:
+            await disable_cmd.finish(f"功能「{name}」在本群已经是禁用状态")
+        disabled.append(module_key)
+    else:
+        # Opt-in 功能：从 enabled 列表中移除
+        enabled = config.get("enabled", {}).get(group_id, [])
+        if optin_key not in enabled:
+            await disable_cmd.finish(f"功能「{name}」在本群已经是禁用状态")
+        enabled.remove(optin_key)
+        if not enabled:
+            config.get("enabled", {}).pop(group_id, None)
+        else:
+            config["enabled"][group_id] = enabled
 
-    disabled.append(module_key)
     _save_config(config)
 
     await disable_cmd.finish(f"已在本群禁用功能「{name}」✓")

@@ -2,6 +2,7 @@
 NoneBot2 塔罗牌插件
 - 命令：/抽塔罗牌  — 随机抽取大阿卡纳塔罗牌（0-21），随机正位/逆位，发送图文消息
 - 命令：/抽十连    — 一次性抽取 10 张塔罗牌，精简输出，每用户每天限用一次
+- 正位世界通知     — 抽到正位世界时 @群主 并发送 "世界！"（需启用「世界通知」功能）
 """
 
 import json
@@ -10,9 +11,14 @@ from datetime import date
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import Bot, MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import (
+    Bot,
+    GroupMessageEvent,
+    MessageEvent,
+    MessageSegment,
+)
+from PIL import Image
 
 # ==================== 资源路径 ====================
 # 项目根目录（yiyin/tarot/__init__.py -> 上两级为项目根目录）
@@ -30,6 +36,28 @@ TAROT_MAP: dict[int, dict] = {card["id"]: card for card in TAROT_DATA}
 # ==================== 每日使用记录（抽十连） ====================
 # key: user_id (str), value: 上次使用的日期
 _ten_draw_usage: dict[str, date] = {}
+
+# ==================== 世界牌 ID ====================
+WORLD_CARD_ID = 21
+
+
+async def _notify_world(bot: Bot, event: MessageEvent) -> None:
+    """正位世界通知：若当前群启用了「世界通知」，则 @群主 并发送 "世界！" """
+    if not isinstance(event, GroupMessageEvent):
+        return
+
+    from yiyin.toggle import is_feature_enabled
+
+    group_id = str(event.group_id)
+    if not is_feature_enabled("world_notify", group_id):
+        return
+
+    members = await bot.get_group_member_list(group_id=event.group_id)
+    owner = next((m for m in members if m["role"] == "owner"), None)
+    if owner:
+        msg = MessageSegment.at(owner["user_id"]) + " 世界！"
+        await bot.send(event, msg)
+
 
 # ==================== 注册命令 ====================
 tarot_cmd = on_command("抽塔罗牌", aliases=set(), priority=10, block=True)
@@ -78,7 +106,11 @@ async def handle_tarot(bot: Bot, event: MessageEvent):
     msg += f"\n{orientation}：{meaning}"
 
     # 5. 发送消息
-    await tarot_cmd.finish(msg)
+    await tarot_cmd.send(msg)
+
+    # 6. 正位世界通知
+    if card_id == WORLD_CARD_ID and is_upright:
+        await _notify_world(bot, event)
 
 
 @tarot_ten_cmd.handle()
@@ -99,14 +131,21 @@ async def handle_tarot_ten(bot: Bot, event: MessageEvent):
 
     # 抽取 10 张牌（可重复）
     lines: list[str] = []
+    has_upright_world = False
     for _ in range(10):
         card_id = random.randint(0, 21)
         is_upright = random.choice([True, False])
         card = TAROT_MAP[card_id]
         orientation = "正位" if is_upright else "逆位"
         lines.append(f"【{card['name_zh']}】（{card['name_en']}）{orientation}")
+        if card_id == WORLD_CARD_ID and is_upright:
+            has_upright_world = True
 
     result = "\n".join(lines)
     msg = MessageSegment.at(user_id) + " 十连抽结果：\n" + result
 
-    await tarot_ten_cmd.finish(msg)
+    await tarot_ten_cmd.send(msg)
+
+    # 正位世界通知
+    if has_upright_world:
+        await _notify_world(bot, event)

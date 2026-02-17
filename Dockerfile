@@ -25,4 +25,4 @@ COPY . .
 # NoneBot 默认端口
 EXPOSE 8080
 
-CMD ["uv", "run", "python", "bot.py"]
+CMD ["sh", "-c", "uv run nb orm upgrade && uv run python bot.py"]

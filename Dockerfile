@@ -1,5 +1,13 @@
 FROM python:3.12-slim
 
+# 安装系统依赖（meme_generator 等插件需要）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libexpat1 \
+    fontconfig \
+    libfontconfig1 \
+    fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
 # 安装 uv 包管理器
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 

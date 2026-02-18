@@ -30,3 +30,5 @@ nonebot-adapter-onebot = [
 "@local" = []
 nonebot_plugin_memes = ["nonebot_plugin_memes"]
 nonebot_plugin_apscheduler = ["nonebot_plugin_apscheduler"]
+nonebot-plugin-wordcloud = ["nonebot_plugin_wordcloud"]
+nonebot_plugin_emojimix = ["nonebot_plugin_emojimix"]

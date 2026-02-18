@@ -187,15 +187,15 @@ async def handle_enable(
     """处理 /启用 命令：在当前群启用指定功能"""
     name = args.extract_plain_text().strip()
     if not name:
-        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
-        await enable_cmd.finish(f"请指定要启用的功能名，可用功能：{'、'.join(all_names)}")
+        plugin_names = list(PLUGIN_REGISTRY.values())
+        await enable_cmd.finish(f"请指定要启用的功能名，可用功能：{'、'.join(plugin_names)}")
 
     module_key = _DISPLAY_TO_MODULE.get(name)
     optin_key = _DISPLAY_TO_OPTIN.get(name)
 
     if module_key is None and optin_key is None:
-        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
-        await enable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(all_names)}")
+        plugin_names = list(PLUGIN_REGISTRY.values())
+        await enable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(plugin_names)}")
 
     group_id = str(event.group_id)
     config = _load_config()
@@ -229,15 +229,15 @@ async def handle_disable(
     """处理 /禁用 命令：在当前群禁用指定功能"""
     name = args.extract_plain_text().strip()
     if not name:
-        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
-        await disable_cmd.finish(f"请指定要禁用的功能名，可用功能：{'、'.join(all_names)}")
+        plugin_names = list(PLUGIN_REGISTRY.values())
+        await disable_cmd.finish(f"请指定要禁用的功能名，可用功能：{'、'.join(plugin_names)}")
 
     module_key = _DISPLAY_TO_MODULE.get(name)
     optin_key = _DISPLAY_TO_OPTIN.get(name)
 
     if module_key is None and optin_key is None:
-        all_names = list(PLUGIN_REGISTRY.values()) + list(OPTIN_REGISTRY.values())
-        await disable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(all_names)}")
+        plugin_names = list(PLUGIN_REGISTRY.values())
+        await disable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(plugin_names)}")
 
     group_id = str(event.group_id)
     config = _load_config()

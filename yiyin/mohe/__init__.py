@@ -42,7 +42,7 @@ if MOHE_IMAGE_DIR.is_dir():
 def _to_message(item: str | Path):
     """将数据项转为可发送的消息"""
     if isinstance(item, Path):
-        return MessageSegment.image(item)
+        return MessageSegment.image(item.read_bytes())
     return item
 
 

@@ -2,9 +2,11 @@
 NoneBot2 WolframAlpha 数学问题求解插件
 - 命令：/算 <问题描述>
 - 功能：调用 WolframAlpha Full Results API，以合并转发消息返回解答
+- 自动将非英文查询翻译为英文后再提交
 """
 
 import os
+import re
 
 import httpx
 from nonebot import on_command
@@ -16,6 +18,8 @@ from nonebot.adapters.onebot.v11 import (
     Message,
 )
 from nonebot.params import CommandArg
+
+from yiyin.translate import translate_text
 
 # ==================== 配置 ====================
 WOLFRAM_APPID: str = os.environ.get("WOLFRAM_APPID", "")
@@ -40,7 +44,13 @@ async def handle_wolfram(bot: Bot, event: MessageEvent, args: Message = CommandA
 
     user_id = event.get_user_id()
 
-    # 3. 调用 WolframAlpha Full Results API
+    # 3. 将非英文查询翻译为英文
+    if re.search(r"[^\x00-\x7F]", query):
+        translated = await translate_text(query, target="en")
+        if translated:
+            query = translated
+
+    # 4. 调用 WolframAlpha Full Results API
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
@@ -76,7 +86,7 @@ async def handle_wolfram(bot: Bot, event: MessageEvent, args: Message = CommandA
                 MessageSegment.at(user_id) + " 未获取到结果，请尝试换一种表述。"
             )
 
-        # 4. 构建合并转发消息节点
+        # 5. 构建合并转发消息节点
         bot_info = await bot.get_login_info()
         bot_name = bot_info.get("nickname", "WolframAlpha")
         bot_uin = str(bot.self_id)
@@ -109,7 +119,7 @@ async def handle_wolfram(bot: Bot, event: MessageEvent, args: Message = CommandA
                 }
             )
 
-        # 5. 发送合并转发消息
+        # 6. 发送合并转发消息
         if isinstance(event, GroupMessageEvent):
             await bot.send_group_forward_msg(
                 group_id=event.group_id, messages=nodes
@@ -122,8 +132,4 @@ async def handle_wolfram(bot: Bot, event: MessageEvent, args: Message = CommandA
     except httpx.TimeoutException:
         await wolfram_cmd.finish(
             MessageSegment.at(user_id) + " 查询超时，请稍后重试。"
-        )
-    except Exception:
-        await wolfram_cmd.finish(
-            MessageSegment.at(user_id) + " 查询出错，请稍后重试。"
         )

@@ -14,7 +14,7 @@ Python包依赖使用 **uv** 进行管理。
     ```
     docker compose up -d --build
     ```
-3. 登录 QQ（首次需要）
+3. 登录 QQ
     * 打开浏览器访问 `<your-IP>:6099/webui`
     * 获取Token： `docker logs yiyin-napcat 2>&1 | grep -i token`
     * 进入网络配置，添加一个 WebSocket 客户端（反向 WS）
@@ -26,3 +26,6 @@ Python包依赖使用 **uv** 进行管理。
 git pull
 docker compose up -d --build
 ```
+
+## 功能列表
+[点击查看](assets/documents/help.json)

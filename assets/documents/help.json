@@ -59,7 +59,7 @@
         "function": [
             {
                 "command": "/对称 (左/右/上/下) [图片]",
-                "description": "生成对应方向的对称图片，支持动图，默认左对称"
+                "description": "生成对应方向的对称图片"
             },
             {
                 "command": "/随机表情 [文字/图片]",
@@ -76,11 +76,20 @@
         ]
     },
     {
+        "module": "翻译",
+        "function": [
+            {
+                "command": "/翻译 <目标语言> <文本>",
+                "description": "翻译文本"
+            }
+        ]
+    },
+    {
         "module": "数学求解",
         "function": [
             {
                 "command": "/算 <问题描述>",
-                "description": "调用 WolframAlpha 求解数学问题，返回图片结果"
+                "description": "求解数学问题"
             }
         ]
     },
@@ -89,15 +98,15 @@
         "function": [
             {
                 "command": "/功能列表",
-                "description": "查看本群所有功能的启用/禁用状态"
+                "description": "查看本群所有功能的状态"
             },
             {
                 "command": "/启用 <功能名>",
-                "description": "在本群启用指定功能（仅管理员/群主）"
+                "description": "在本群启用指定功能（仅管理）"
             },
             {
                 "command": "/禁用 <功能名>",
-                "description": "在本群禁用指定功能（仅管理员/群主）"
+                "description": "在本群禁用指定功能（仅管理）"
             }
         ]
     }

@@ -2,6 +2,7 @@
 NoneBot2 塔罗牌插件
 - 命令：/抽塔罗牌  — 随机抽取大阿卡纳塔罗牌（0-21），随机正位/逆位，发送图文消息
 - 命令：/抽十连    — 一次性抽取 10 张塔罗牌，精简输出，每用户每天限用一次
+- 命令：/占卜      — 引用抽十连结果，使用 AI 进行塔罗牌占卜解读
 - 正位世界通知     — 抽到正位世界时 @群主 并发送 "世界！"（需启用「世界通知」功能）
 """
 
@@ -18,7 +19,10 @@ from nonebot.adapters.onebot.v11 import (
     MessageEvent,
     MessageSegment,
 )
+from nonebot.params import CommandArg
 from PIL import Image
+
+from yiyin.llmapi import chat_completion
 
 # ==================== 资源路径 ====================
 # 项目根目录（yiyin/tarot/__init__.py -> 上两级为项目根目录）
@@ -149,3 +153,64 @@ async def handle_tarot_ten(bot: Bot, event: MessageEvent):
     # 正位世界通知
     if has_upright_world:
         await _notify_world(bot, event)
+
+
+# ==================== 占卜命令 ====================
+_DIVINATION_PROMPT = (
+    "你是一个塔罗牌占卜师，风格随性，说话像朋友聊天一样自然。"
+    "用户会给你一组塔罗牌抽牌结果（十连抽），你需要根据牌面组合给出整体运势解读。\n"
+    "要求：\n"
+    "- 总共说3-5句话，不要分点、不要用标题，就像跟朋友随口聊一样\n"
+    "- 综合所有牌面给一个整体解读，不要逐张分析\n"
+    "- 可以点出一两张关键牌稍作展开\n"
+    "- 语气轻松口语化，可以带点调侃，别端着\n"
+    "- 绝对不要说'作为AI'之类的话"
+)
+
+divination_cmd = on_command("占卜", priority=10, block=True)
+
+
+@divination_cmd.handle()
+async def handle_divination(bot: Bot, event: MessageEvent):
+    """处理 /占卜 命令：引用抽十连结果进行 AI 占卜"""
+    user_id = event.get_user_id()
+
+    # 提取引用消息中的牌面结果
+    cards_text = ""
+    if event.reply:
+        reply_msg = event.reply.message
+        cards_text = reply_msg.extract_plain_text().strip()
+
+    if not cards_text:
+        await divination_cmd.finish(
+            MessageSegment.at(user_id) + " 请引用一条抽十连的结果来占卜哦~"
+        )
+
+    # 补充用户的提问（如有）
+    from nonebot.adapters.onebot.v11 import Message
+
+    user_extra = event.get_message().extract_plain_text().strip()
+
+    user_content = f"我的抽牌结果：\n{cards_text}"
+    if user_extra:
+        user_content += f"\n\n我想问的方向：{user_extra}"
+
+    messages = [
+        {"role": "system", "content": _DIVINATION_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+
+    reply = await chat_completion(
+        messages,
+        model="claude-haiku-4-5-20251001",
+        temperature=0.9,
+        max_tokens=300,
+    )
+
+    if not reply:
+        await divination_cmd.finish(
+            MessageSegment.at(user_id) + " 水晶球今天不太给力……稍后再试试吧"
+        )
+
+    reply = reply.strip().strip('"').strip("'")
+    await divination_cmd.finish(MessageSegment.at(user_id) + " " + reply)

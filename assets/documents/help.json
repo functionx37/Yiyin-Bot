@@ -1,54 +1,104 @@
 [
     {
-        "command":"/help",
-        "description":"生成帮助菜单"
+        "module": "帮助",
+        "function": [
+            {
+                "command": "@Bot /help",
+                "description": "生成帮助菜单"
+            },
+            {
+                "command": "/词云",
+                "description": "生成词云功能帮助菜单"
+            }
+        ]
     },
     {
-        "command":"/抽塔罗牌",
-        "description":"随机抽取一张塔罗牌"
+        "module": "塔罗牌",
+        "function": [
+            {
+                "command": "/抽塔罗牌",
+                "description": "随机抽取一张塔罗牌"
+            },
+            {
+                "command": "/抽十连",
+                "description": "随机抽取十张塔罗牌"
+            }
+        ]
     },
     {
-        "command":"/新增群友 <昵称>",
-        "description":"新增一个要记录语录的群友"
+        "module": "群友语录",
+        "function": [
+            {
+                "command": "/新增群友 <昵称>",
+                "description": "新增一个要记录语录的群友"
+            },
+            {
+                "command": "/新增别名 <已有昵称> <别名>",
+                "description": "为已有群友添加一个别名"
+            },
+            {
+                "command": "/群友列表",
+                "description": "查看本群全部被记录的群友"
+            },
+            {
+                "command": "/上传 <昵称> [图片]",
+                "description": "上传一条群友的发言截图"
+            },
+            {
+                "command": "/查看 <昵称>",
+                "description": "随机查看一条群友的语录截图"
+            },
+            {
+                "command": "/随机群友",
+                "description": "从本群全部语录中随机抽取一条"
+            }
+        ]
     },
     {
-        "command":"/新增别名 <已有昵称> <别名>",
-        "description":"为已有群友添加一个别名"
+        "module": "表情包制作",
+        "function": [
+            {
+                "command": "/对称 (左/右/上/下) [图片]",
+                "description": "生成对应方向的对称图片，支持动图，默认左对称"
+            },
+            {
+                "command": "/随机表情 [文字/图片]",
+                "description": "生成对应的随机表情"
+            },
+            {
+                "command": "/<关键词> [文字/图片]",
+                "description": "生成对应的表情"
+            },
+            {
+                "command": "<emoji>+<emoji>",
+                "description": "合成emoji"
+            }
+        ]
     },
     {
-        "command":"/群友列表",
-        "description":"查看本群全部被记录的群友"
+        "module": "数学求解",
+        "function": [
+            {
+                "command": "/算 <问题描述>",
+                "description": "调用 WolframAlpha 求解数学问题，返回图片结果"
+            }
+        ]
     },
     {
-        "command":"/上传 <昵称> [图片]",
-        "description":"上传一条群友的发言截图"
-    },
-    {
-        "command":"/查看 <昵称>",
-        "description":"随机查看一条群友的语录截图"
-    },
-    {
-        "command":"/随机群友",
-        "description":"从本群全部语录中随机抽取一条"
-    },
-    {
-        "command":"/对称 [左/右/上/下] [图片]",
-        "description":"生成对应方向的对称图片，支持动图，默认左对称"
-    },
-    {
-        "command":"/算 <问题描述>",
-        "description":"调用 WolframAlpha 求解数学问题，返回图片结果"
-    },
-    {
-        "command":"/功能列表",
-        "description":"查看本群所有功能的启用/禁用状态"
-    },
-    {
-        "command":"/启用 <功能名>",
-        "description":"在本群启用指定功能（仅管理员/群主）"
-    },
-    {
-        "command":"/禁用 <功能名>",
-        "description":"在本群禁用指定功能（仅管理员/群主）"
+        "module": "功能管理",
+        "function": [
+            {
+                "command": "/功能列表",
+                "description": "查看本群所有功能的启用/禁用状态"
+            },
+            {
+                "command": "/启用 <功能名>",
+                "description": "在本群启用指定功能（仅管理员/群主）"
+            },
+            {
+                "command": "/禁用 <功能名>",
+                "description": "在本群禁用指定功能（仅管理员/群主）"
+            }
+        ]
     }
 ]

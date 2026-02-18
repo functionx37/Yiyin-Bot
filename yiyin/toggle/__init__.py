@@ -29,29 +29,23 @@ from nonebot.permission import SUPERUSER
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 CONFIG_PATH = PROJECT_ROOT / "data" / "toggle" / "config.json"
+FEATURES_PATH = PROJECT_ROOT / "config" / "features.json"
 
-# ==================== 插件注册表（默认启用，可禁用） ====================
-# key: 插件模块名（yiyin/ 下的目录名）
-# value: 用户可见的中文功能名
-# 新增插件时，在此处添加一行即可纳入开关管理
-PLUGIN_REGISTRY: dict[str, str] = {
-    "tarot": "塔罗牌",
-    "quotes": "群友语录",
-    "symmetric": "对称图片",
-    "wolfram": "数学求解",
-}
+# ==================== 从外部配置加载功能注册表 ====================
+# config/features.json 中 "plugins" 为默认启用可禁用的插件，"optin" 为默认关闭需手动启用的功能
+# 新增插件时，编辑 config/features.json 即可纳入开关管理
+with open(FEATURES_PATH, "r", encoding="utf-8") as _f:
+    _features = json.load(_f)
 
-# ==================== Opt-in 功能注册表（默认关闭，需手动启用） ====================
-# key: 功能标识（供其他插件查询）
-# value: 用户可见的中文功能名
-OPTIN_REGISTRY: dict[str, str] = {
-    "world_notify": "世界通知",
-    "mohe": "摩诃",
-}
+PLUGIN_REGISTRY: dict[str, str] = _features.get("plugins", {})
+OPTIN_REGISTRY: dict[str, str] = _features.get("optin", {})
 
 # 反向映射：中文功能名 -> 模块名 / 功能标识（用于命令参数解析）
 _DISPLAY_TO_MODULE: dict[str, str] = {v: k for k, v in PLUGIN_REGISTRY.items()}
 _DISPLAY_TO_OPTIN: dict[str, str] = {v: k for k, v in OPTIN_REGISTRY.items()}
+
+# 插件级功能名列表（用于错误提示，不含默认禁用的 opt-in 功能）
+_PLUGIN_DISPLAY_NAMES: list[str] = list(PLUGIN_REGISTRY.values())
 
 # 本插件名称，不可被禁用
 _SELF_PLUGIN = "toggle"
@@ -187,15 +181,17 @@ async def handle_enable(
     """处理 /启用 命令：在当前群启用指定功能"""
     name = args.extract_plain_text().strip()
     if not name:
-        plugin_names = list(PLUGIN_REGISTRY.values())
-        await enable_cmd.finish(f"请指定要启用的功能名，可用功能：{'、'.join(plugin_names)}")
+        await enable_cmd.finish(
+            f"请指定要启用的功能名，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+        )
 
     module_key = _DISPLAY_TO_MODULE.get(name)
     optin_key = _DISPLAY_TO_OPTIN.get(name)
 
     if module_key is None and optin_key is None:
-        plugin_names = list(PLUGIN_REGISTRY.values())
-        await enable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(plugin_names)}")
+        await enable_cmd.finish(
+            f"未知功能「{name}」，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+        )
 
     group_id = str(event.group_id)
     config = _load_config()
@@ -229,15 +225,17 @@ async def handle_disable(
     """处理 /禁用 命令：在当前群禁用指定功能"""
     name = args.extract_plain_text().strip()
     if not name:
-        plugin_names = list(PLUGIN_REGISTRY.values())
-        await disable_cmd.finish(f"请指定要禁用的功能名，可用功能：{'、'.join(plugin_names)}")
+        await disable_cmd.finish(
+            f"请指定要禁用的功能名，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+        )
 
     module_key = _DISPLAY_TO_MODULE.get(name)
     optin_key = _DISPLAY_TO_OPTIN.get(name)
 
     if module_key is None and optin_key is None:
-        plugin_names = list(PLUGIN_REGISTRY.values())
-        await disable_cmd.finish(f"未知功能「{name}」，可用功能：{'、'.join(plugin_names)}")
+        await disable_cmd.finish(
+            f"未知功能「{name}」，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+        )
 
     group_id = str(event.group_id)
     config = _load_config()

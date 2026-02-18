@@ -1,0 +1,12 @@
+{
+  "plugins": {
+    "tarot": "塔罗牌",
+    "quotes": "群友语录",
+    "symmetric": "对称图片",
+    "wolfram": "数学求解"
+  },
+  "optin": {
+    "world_notify": "世界通知",
+    "mohe": "摩诃"
+  }
+}

@@ -51,23 +51,9 @@ async def _on_connect(bot: Bot):
 
 
 # ==================== 工具函数 ====================
-def _is_at_me(event: GroupMessageEvent) -> bool:
-    """检查消息是否 @了机器人"""
-    if not _self_id:
-        return False
-    for seg in event.message:
-        if seg.type == "at" and str(seg.data.get("qq", "")) == _self_id:
-            return True
-    return False
-
-
 def _extract_text(event: GroupMessageEvent) -> str:
-    """提取消息的纯文本内容，去掉 @ 段"""
-    parts: list[str] = []
-    for seg in event.message:
-        if seg.type == "text":
-            parts.append(str(seg.data.get("text", "")))
-    return "".join(parts).strip()
+    """提取消息的纯文本内容"""
+    return event.get_plaintext().strip()
 
 
 def _get_display_name(event: GroupMessageEvent) -> str:
@@ -83,7 +69,7 @@ async def _should_reply(event: GroupMessageEvent) -> bool:
     if not is_feature_enabled("roleplay", str(group_id)):
         return False
 
-    if _is_at_me(event):
+    if event.to_me:
         return True
 
     now = time.time()
@@ -133,7 +119,7 @@ async def handle_group_msg(bot: Bot, event: GroupMessageEvent):
     })
 
     # 判断是否回复
-    at_me = _is_at_me(event)
+    at_me = event.to_me
 
     if not at_me:
         now = time.time()

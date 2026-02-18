@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nonebot import get_bots, get_driver, on_command, require
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, MessageSegment
 
 require("nonebot_plugin_apscheduler")
 from nonebot_plugin_apscheduler import scheduler  # noqa: E402
@@ -22,13 +22,28 @@ from yiyin.toggle import is_feature_enabled  # noqa: E402
 # ==================== 资源路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 MOHE_JSON_PATH = PROJECT_ROOT / "assets" / "documents" / "mohe.json"
+MOHE_IMAGE_DIR = PROJECT_ROOT / "assets" / "images" / "mohe"
+
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 # ==================== 加载摩诃数据 ====================
 with open(MOHE_JSON_PATH, "r", encoding="utf-8") as f:
     _raw_data: list[str] = json.load(f)
 
-# 过滤掉空字符串
-MOHE_DATA: list[str] = [s for s in _raw_data if s.strip()]
+# 文本 + 图片统一池
+MOHE_DATA: list[str | Path] = [s for s in _raw_data if s.strip()]
+
+if MOHE_IMAGE_DIR.is_dir():
+    for img in sorted(MOHE_IMAGE_DIR.iterdir()):
+        if img.suffix.lower() in IMAGE_SUFFIXES:
+            MOHE_DATA.append(img)
+
+
+def _to_message(item: str | Path):
+    """将数据项转为可发送的消息"""
+    if isinstance(item, Path):
+        return MessageSegment.image(item)
+    return item
 
 
 # ==================== 注册命令 ====================
@@ -46,8 +61,8 @@ async def handle_random_mohe(bot: Bot, event: GroupMessageEvent):
     count = random.randint(3, 5)
     selected = random.sample(MOHE_DATA, min(count, len(MOHE_DATA)))
 
-    for i, text in enumerate(selected):
-        await bot.send(event, text)
+    for i, item in enumerate(selected):
+        await bot.send(event, _to_message(item))
         if i < len(selected) - 1:
             await asyncio.sleep(random.uniform(1, 3))
 
@@ -75,9 +90,9 @@ async def _auto_mohe():
         count = random.randint(3, 5)
         selected = random.sample(MOHE_DATA, min(count, len(MOHE_DATA)))
 
-        for i, text in enumerate(selected):
+        for i, item in enumerate(selected):
             try:
-                await bot.send_group_msg(group_id=int(group_id), message=text)
+                await bot.send_group_msg(group_id=int(group_id), message=_to_message(item))
             except Exception:
                 break
             if i < len(selected) - 1:

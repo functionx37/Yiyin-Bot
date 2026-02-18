@@ -152,7 +152,12 @@ translate_cmd = on_command("翻译", priority=10, block=True)
 
 @translate_cmd.handle()
 async def handle_translate(event: MessageEvent, args: Message = CommandArg()):
-    """处理 /翻译 命令"""
+    """
+    处理 /翻译 命令
+    支持两种用法：
+      1. /翻译 <目标语言> <文本>
+      2. 引用一条消息并发送 /翻译 <目标语言>
+    """
     if not TENCENT_SECRET_ID or not TENCENT_SECRET_KEY:
         await translate_cmd.finish("翻译 API 未配置，请联系管理员。")
 
@@ -161,20 +166,28 @@ async def handle_translate(event: MessageEvent, args: Message = CommandArg()):
         supported = "、".join(LANG_DISPLAY.values())
         await translate_cmd.finish(
             f"用法：/翻译 <目标语言> <文本>\n"
+            f"或引用一条消息并发送：/翻译 <目标语言>\n"
             f"支持语言：{supported}\n"
             f"示例：/翻译 英文 你好世界"
         )
 
     parts = raw.split(maxsplit=1)
-    if len(parts) < 2:
-        await translate_cmd.finish("请同时提供目标语言和待翻译文本，例如：/翻译 英文 你好世界")
-
-    lang_input, text = parts
+    lang_input = parts[0]
     target = LANG_MAP.get(lang_input)
     if not target:
         supported = "、".join(LANG_DISPLAY.values())
         await translate_cmd.finish(
             f"不支持的目标语言「{lang_input}」\n支持的语言：{supported}"
+        )
+
+    # 优先使用命令参数中的文本，其次从引用消息中提取
+    text = parts[1] if len(parts) >= 2 else ""
+    if not text and event.reply:
+        text = event.reply.message.extract_plain_text().strip()
+    if not text:
+        await translate_cmd.finish(
+            "请提供待翻译文本，或引用一条消息。\n"
+            "示例：/翻译 英文 你好世界"
         )
 
     result = await translate_text(text, target)

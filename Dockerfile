@@ -24,6 +24,7 @@ COPY . .
 
 # meme-generator 资源存储路径（持久化到挂载卷）
 ENV MEME_HOME=/app/data/meme_generator
+ENV PYTHONWARNINGS="ignore::SyntaxWarning"
 
 # NoneBot 默认端口
 EXPOSE 8080

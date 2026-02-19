@@ -4,6 +4,7 @@ NoneBot2 群友语录插件
 - 命令：/新增别名 <已有昵称> <别名>
 - 命令：/群友列表
 - 命令：/上传 <群友昵称> [图片]
+- 命令：/截图上传 <群友昵称> [引用消息]
 - 命令：/查看 <群友昵称>
 - 命令：/随机群友
 - 功能：记录并随机查看群友的发言截图
@@ -136,6 +137,7 @@ add_member_cmd = on_command("新增群友", priority=10, block=True)
 add_alias_cmd = on_command("新增别名", priority=10, block=True)
 list_members_cmd = on_command("群友列表", priority=10, block=True)
 upload_cmd = on_command("上传", priority=10, block=True)
+screenshot_upload_cmd = on_command("截图上传", priority=10, block=True)
 view_cmd = on_command("查看", priority=10, block=True)
 random_member_cmd = on_command("随机群友", priority=10, block=True)
 
@@ -284,6 +286,117 @@ async def handle_upload(
     await upload_cmd.finish(
         f"{prefix}已成功为群友「{canonical}」保存 {saved_count} 张语录截图✓"
     )
+
+
+async def _extract_reply_text(bot: Bot, event: GroupMessageEvent) -> str:
+    """从引用消息中提取文字内容"""
+    if not event.reply:
+        return ""
+
+    if event.reply.message:
+        parts: list[str] = []
+        for seg in event.reply.message:
+            if seg.type == "text":
+                parts.append(seg.data.get("text", ""))
+            elif seg.type == "at":
+                qq = seg.data.get("qq", "")
+                try:
+                    info = await bot.get_group_member_info(
+                        group_id=event.group_id, user_id=int(qq)
+                    )
+                    parts.append(
+                        f"@{info.get('card') or info.get('nickname') or qq}"
+                    )
+                except Exception:
+                    parts.append(f"@{qq}")
+        result = "".join(parts).strip()
+        if result:
+            return result
+
+    try:
+        msg_data = await bot.get_msg(message_id=event.reply.message_id)
+        raw = msg_data.get("message", [])
+        if isinstance(raw, str):
+            return Message(raw).extract_plain_text()
+        if isinstance(raw, list):
+            return "".join(
+                s.get("data", {}).get("text", "")
+                for s in raw
+                if isinstance(s, dict) and s.get("type") == "text"
+            ).strip()
+    except Exception:
+        pass
+    return ""
+
+
+@screenshot_upload_cmd.handle()
+async def handle_screenshot_upload(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    """处理 /截图上传 命令：引用消息生成聊天截图并保存为语录"""
+    from .draw import async_generate_chat_screenshot
+
+    name = args.extract_plain_text().strip()
+    if not name:
+        await screenshot_upload_cmd.finish(
+            "请输入群友昵称并引用一条消息，例如：/截图上传 小明（引用消息）"
+        )
+
+    if not event.reply:
+        await screenshot_upload_cmd.finish(
+            "请引用一条消息来生成截图，例如回复某条消息并输入：/截图上传 小明"
+        )
+
+    reply_text = await _extract_reply_text(bot, event)
+    if not reply_text:
+        await screenshot_upload_cmd.finish("引用的消息没有文字内容，无法生成截图")
+
+    sender_id = event.reply.sender.user_id
+    group_id = str(event.group_id)
+
+    try:
+        member_info = await bot.get_group_member_info(
+            group_id=event.group_id, user_id=sender_id
+        )
+        sender_nick = (
+            member_info.get("card") or member_info.get("nickname") or "群友"
+        )
+    except Exception:
+        sender_nick = getattr(event.reply.sender, "nickname", None) or "群友"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                f"http://q1.qlogo.cn/g?b=qq&nk={sender_id}&s=100", timeout=10
+            )
+            resp.raise_for_status()
+            avatar_bytes = resp.content
+        except Exception:
+            avatar_bytes = b""
+
+    screenshot_bytes = await async_generate_chat_screenshot(
+        avatar_bytes, sender_nick, reply_text
+    )
+
+    auto_registered = False
+    canonical = _resolve_name(group_id, name)
+    if not canonical:
+        members = _load_members(group_id)
+        members.append(name)
+        _save_members(group_id, members)
+        canonical = name
+        auto_registered = True
+
+    image_dir = _get_member_image_dir(group_id, canonical)
+    image_dir.mkdir(parents=True, exist_ok=True)
+    filepath = image_dir / f"{uuid.uuid4().hex}.png"
+    filepath.write_bytes(screenshot_bytes)
+
+    prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
+    msg = MessageSegment.text(
+        f"{prefix}已为群友「{canonical}」生成并保存截图✓\n"
+    ) + MessageSegment.image(screenshot_bytes)
+    await screenshot_upload_cmd.finish(msg)
 
 
 @view_cmd.handle()

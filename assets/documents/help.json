@@ -113,5 +113,18 @@
                 "description": "在本群禁用指定功能（仅管理）"
             }
         ]
+    },
+    {
+        "module": "猫猫虫",
+        "function": [
+            {
+                "command": "capoo",
+                "description": "随机发送一张 capoo 的表情包"
+            },
+            {
+                "command": "添加capoo",
+                "description": "新增capoo（需管理）"
+            }
+        ]
     }
 ]

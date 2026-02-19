@@ -14,7 +14,6 @@ dependencies = [
     "nonebot-plugin-apscheduler>=0.5.0",
     "nonebot-plugin-emojimix>=0.4.1",
     "nonebot-plugin-wordcloud>=0.9.0",
-    "nonebot-plugin-capoo>=0.1.5",
 ]
 
 [tool.nonebot]
@@ -33,4 +32,3 @@ nonebot_plugin_memes = ["nonebot_plugin_memes"]
 nonebot_plugin_apscheduler = ["nonebot_plugin_apscheduler"]
 nonebot-plugin-wordcloud = ["nonebot_plugin_wordcloud"]
 nonebot_plugin_emojimix = ["nonebot_plugin_emojimix"]
-nonebot-plugin-capoo = ["nonebot_plugin_capoo"]

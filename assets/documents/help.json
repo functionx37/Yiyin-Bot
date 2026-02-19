@@ -113,5 +113,23 @@
                 "description": "在本群禁用指定功能（仅管理）"
             }
         ]
+    },
+    {
+        "module": "动漫/Gal识别",
+        "function": [
+            {
+                "command": "#识别/角色/人物 (动漫/gal) [图片]",
+                "description": "识别图中角色"
+            }
+        ]
+    },
+    {
+        "module": "伪造消息",
+        "function": [
+            {
+                "command": "@<群友1> <消息1>|@<群友2> <消息2>",
+                "description": "生成假聊天记录"
+            }
+        ]
     }
 ]

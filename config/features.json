@@ -7,11 +7,9 @@
     "translate": "翻译",
     "choose": "随机选择",
     "nonebot_plugin_memes": "表情包制作",
-    "nonebot_plugin_wordcloud": "词云",
     "nonebot_plugin_emojimix": "Emoji合成",
     "nonebot_plugin_anime_trace": "动漫识别",
-    "emoji_reaction": "贴表情",
-    "nonebot_plugin_meme_stickers": "表情包贴纸"
+    "emoji_reaction": "贴表情"
   },
   "optin": {
     "world_notify": "世界通知",

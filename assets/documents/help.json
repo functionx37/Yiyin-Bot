@@ -5,10 +5,6 @@
             {
                 "command": "@Bot /help",
                 "description": "生成帮助菜单"
-            },
-            {
-                "command": "/词云",
-                "description": "生成词云功能帮助菜单"
             }
         ]
     },
@@ -80,10 +76,6 @@
             {
                 "command": "<emoji>+<emoji>",
                 "description": "合成emoji"
-            },
-            {
-                "command": "pjsk/arc",
-                "description": "生成对应风格表情包"
             }
         ]
     },

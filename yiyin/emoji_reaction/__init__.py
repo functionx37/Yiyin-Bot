@@ -1,8 +1,10 @@
 """
-NoneBot2 贴表情插件
+NoneBot2 贴表情 / 发表情插件
 - 命令：/贴表情列表            — 以合并转发消息形式展示所有可用表情
 - 命令：/贴 <ID/含义/emoji> [引用] — 给引用的消息贴上指定表情
 - 命令：/贴<数字>个 [引用]      — 给引用的消息随机贴上指定个数的表情
+- 命令：/发 <ID/含义>          — 发送对应的QQ系统表情
+- 命令：/发 随机               — 随机发送一个QQ系统表情
 """
 
 import asyncio
@@ -41,6 +43,7 @@ def _load_config() -> dict:
 # ==================== 注册命令 ====================
 list_cmd = on_command("贴表情列表", priority=10, block=True)
 stick_cmd = on_command("贴", priority=10, block=True)
+send_cmd = on_command("发", priority=10, block=True)
 
 _RANDOM_RE = re.compile(r"^(\d+)个$")
 
@@ -114,10 +117,7 @@ async def handle_emoji_list(bot: Bot, event: GroupMessageEvent):
 @stick_cmd.handle()
 async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
     """统一处理 /贴N个 和 /贴<表情>"""
-    if not event.reply:
-        return
-
-    target_msg_id = event.reply.message_id
+    target_msg_id = event.reply.message_id if event.reply else event.message_id
     text = args.extract_plain_text().strip()
     if not text:
         return
@@ -157,6 +157,28 @@ async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         )
     except Exception:
         pass
+
+
+# ==================== /发 ====================
+@send_cmd.handle()
+async def handle_send(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    """发送QQ系统表情"""
+    text = args.extract_plain_text().strip()
+    if not text:
+        return
+
+    if text == "随机":
+        cfg = _load_config()
+        max_id = cfg.get("max_emoji_id", 470)
+        face_id = random.randint(1, max_id)
+        await send_cmd.finish(Message(MessageSegment.face(face_id)))
+        return
+
+    emoji_id = _resolve_emoji(text)
+    if not emoji_id:
+        return
+
+    await send_cmd.finish(Message(MessageSegment.face(int(emoji_id))))
 
 
 # ==================== 工具函数 ====================

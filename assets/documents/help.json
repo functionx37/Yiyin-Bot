@@ -105,7 +105,7 @@
         "module": "随机选择",
         "function": [
             {
-                "command": "/选 <选项1>还是<选项2>(...)",
+                "command": "/选 <选项1>还是<选项2>[还是<选项3>...]",
                 "description": "从多个选项中随机选择一个"
             }
         ]
@@ -142,24 +142,6 @@
             {
                 "command": "@<群友1> <消息1>|@<群友2> <消息2>",
                 "description": "生成假聊天记录"
-            }
-        ]
-    },
-    {
-        "module": "能不能好好说话",
-        "function": [
-            {
-                "command": "<缩写>是啥",
-                "description": "把缩写翻译成人话"
-            }
-        ]
-    },
-    {
-        "module": "今日运势",
-        "function": [
-            {
-                "command": "/luck",
-                "description": "生成今日运势"
             }
         ]
     }

@@ -1567,21 +1567,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nonebot-plugin-luoguluck"
-version = "0.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "nonebot-adapter-onebot" },
-    { name = "nonebot-plugin-localstore" },
-    { name = "nonebot2" },
-    { name = "pillow" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/13/52/5814918d77fc885fd54671dec33e517ee628ff47f78be70a87b4285ee6ff/nonebot_plugin_luoguluck-0.3.tar.gz", hash = "sha256:b06510aa304ed2923fbc544d6d5093576a1df24248fb09f84e85c25483d3c161", size = 14628352, upload-time = "2025-03-03T14:27:37.509Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/28/affe11a0e3ffd6900cac49abae058df7b6b6ecc8274d9e036c0bee5d06da/nonebot_plugin_luoguluck-0.3-py3-none-any.whl", hash = "sha256:110ed78bfc17879129b84026890b8a393a9584984651f22eb008a4fd770c6840", size = 14635119, upload-time = "2025-03-03T14:27:13.228Z" },
-]
-
-[[package]]
 name = "nonebot-plugin-memes"
 version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3306,7 +3291,6 @@ dependencies = [
     { name = "nonebot-plugin-datastore" },
     { name = "nonebot-plugin-emojimix" },
     { name = "nonebot-plugin-fakemsg" },
-    { name = "nonebot-plugin-luoguluck" },
     { name = "nonebot-plugin-memes" },
     { name = "nonebot-plugin-nbnhhsh-q" },
     { name = "nonebot-plugin-orm", extra = ["default"] },
@@ -3324,7 +3308,6 @@ requires-dist = [
     { name = "nonebot-plugin-datastore", specifier = ">=1.0.0" },
     { name = "nonebot-plugin-emojimix", specifier = ">=0.4.1" },
     { name = "nonebot-plugin-fakemsg", specifier = ">=0.1.9" },
-    { name = "nonebot-plugin-luoguluck", specifier = ">=0.3" },
     { name = "nonebot-plugin-memes", specifier = ">=0.8.1" },
     { name = "nonebot-plugin-nbnhhsh-q", specifier = ">=0.1.3" },
     { name = "nonebot-plugin-orm", extras = ["default"], specifier = ">=0.8.3" },

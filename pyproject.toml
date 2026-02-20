@@ -18,7 +18,6 @@ dependencies = [
     "nonebot-plugin-fakemsg>=0.1.9",
     "nonebot-plugin-datastore>=1.0.0",
     "nonebot-plugin-nbnhhsh-q>=0.1.3",
-    "nonebot-plugin-luoguluck>=0.3",
 ]
 
 [tool.nonebot]

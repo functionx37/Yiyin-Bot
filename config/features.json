@@ -10,7 +10,8 @@
     "nonebot_plugin_wordcloud": "词云",
     "nonebot_plugin_emojimix": "Emoji合成",
     "nonebot_plugin_anime_trace": "动漫识别",
-    "nonebot_plugin_fakemsg": "伪造消息"
+    "nonebot_plugin_fakemsg": "伪造消息",
+    "emoji_reaction": "贴表情"
   },
   "optin": {
     "world_notify": "世界通知",

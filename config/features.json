@@ -5,7 +5,12 @@
     "symmetric": "对称图片",
     "wolfram": "数学求解",
     "translate": "翻译",
-    "choose": "随机选择"
+    "choose": "随机选择",
+    "nonebot_plugin_memes": "表情包制作",
+    "nonebot_plugin_wordcloud": "词云",
+    "nonebot_plugin_emojimix": "Emoji合成",
+    "nonebot_plugin_anime_trace": "动漫识别",
+    "nonebot_plugin_fakemsg": "伪造消息"
   },
   "optin": {
     "world_notify": "世界通知",

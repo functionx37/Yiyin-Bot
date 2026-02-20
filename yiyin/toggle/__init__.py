@@ -98,12 +98,25 @@ def is_feature_enabled(feature_key: str, group_id: str) -> bool:
 
 
 def _get_plugin_key(matcher: Matcher) -> str | None:
-    """从 Matcher 提取插件模块名（兼容多种命名格式）"""
+    """从 Matcher 提取插件模块名（兼容内置插件与外部插件）
+
+    匹配优先级：
+    1. 全名直接匹配（如 nonebot_plugin_memes）
+    2. 子插件前缀匹配（如 nonebot_plugin_memes.utils → nonebot_plugin_memes）
+    3. 取最后一段匹配（如 yiyin.tarot → tarot）
+    """
     plugin = matcher.plugin
     if plugin is None:
         return None
     name = plugin.name
-    # NoneBot2 可能使用 "yiyin.tarot" 或 "yiyin:tarot" 等格式
+
+    _all_keys = PLUGIN_REGISTRY | OPTIN_REGISTRY
+    if name in _all_keys:
+        return name
+    for key in _all_keys:
+        if name.startswith(key + ".") or name.startswith(key + ":"):
+            return key
+
     for sep in (".", ":"):
         if sep in name:
             name = name.rsplit(sep, 1)[-1]

@@ -1587,19 +1587,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nonebot-plugin-nbnhhsh-q"
-version = "0.1.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "nonebot2" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/31/13/2ecf05545f01d2461a2a7a75c3776e20403900b2acfafda395910a208632/nonebot_plugin_nbnhhsh_q-0.1.3.tar.gz", hash = "sha256:2b9f0e06e37a2870585c1526977362f771112f3f97fa7944252bd8ada310ec56", size = 3882, upload-time = "2025-02-16T04:56:48.265Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/f7/f242583ff731d839e6c46789e9f8b72d2e1ae66367fade617aba221b980d/nonebot_plugin_nbnhhsh_q-0.1.3-py3-none-any.whl", hash = "sha256:d0589288f18fb01e2437edc7fddd4827d67e0d30eaa41c8391d273c69a01ae4b", size = 5071, upload-time = "2025-02-16T04:56:46.96Z" },
-]
-
-[[package]]
 name = "nonebot-plugin-orm"
 version = "0.8.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3292,7 +3279,6 @@ dependencies = [
     { name = "nonebot-plugin-emojimix" },
     { name = "nonebot-plugin-fakemsg" },
     { name = "nonebot-plugin-memes" },
-    { name = "nonebot-plugin-nbnhhsh-q" },
     { name = "nonebot-plugin-orm", extra = ["default"] },
     { name = "nonebot-plugin-wordcloud" },
     { name = "nonebot2", extra = ["fastapi", "httpx", "websockets"] },
@@ -3309,7 +3295,6 @@ requires-dist = [
     { name = "nonebot-plugin-emojimix", specifier = ">=0.4.1" },
     { name = "nonebot-plugin-fakemsg", specifier = ">=0.1.9" },
     { name = "nonebot-plugin-memes", specifier = ">=0.8.1" },
-    { name = "nonebot-plugin-nbnhhsh-q", specifier = ">=0.1.3" },
     { name = "nonebot-plugin-orm", extras = ["default"], specifier = ">=0.8.3" },
     { name = "nonebot-plugin-wordcloud", specifier = ">=0.9.0" },
     { name = "nonebot2", extras = ["fastapi", "httpx", "websockets"], specifier = ">=2.4.4" },

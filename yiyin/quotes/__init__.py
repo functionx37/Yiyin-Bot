@@ -228,7 +228,7 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
         image_dir = _get_member_image_dir(group_id, name)
         count = len(list(image_dir.glob("*.*"))) if image_dir.exists() else 0
         alias_list = alias_map.get(name, [])
-        alias_str = f"（别名：{'、'.join(alias_list)}）" if alias_list else ""
+        alias_str = f"（{'、'.join(alias_list)}）" if alias_list else ""
         lines.append(f"  {i + 1}. {name}{alias_str}：{count}条")
     member_list = "\n".join(lines)
     await list_members_cmd.finish(f"本群已记录的群友：\n{member_list}")

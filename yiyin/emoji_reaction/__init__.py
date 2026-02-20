@@ -23,35 +23,38 @@ from nonebot.params import CommandArg
 # ==================== 资源路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 EMOJI_JSON_PATH = PROJECT_ROOT / "assets" / "documents" / "emoji_reactions.json"
+CONFIG_PATH = PROJECT_ROOT / "config" / "emoji_reaction.json"
 
 # ==================== 加载表情数据 ====================
 with open(EMOJI_JSON_PATH, "r", encoding="utf-8") as f:
     EMOJI_LIST: list[dict] = json.load(f)
 
-# 构建查找索引：按 id、name、emoji 查找
 _BY_ID: dict[str, dict] = {e["id"]: e for e in EMOJI_LIST}
 _BY_NAME: dict[str, dict] = {e["name"]: e for e in EMOJI_LIST}
 _BY_EMOJI: dict[str, dict] = {e["emoji"]: e for e in EMOJI_LIST if "emoji" in e}
 
-MAX_RANDOM_COUNT = 20
+
+def _load_config() -> dict:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 # ==================== 注册命令 ====================
 list_cmd = on_command("贴表情列表", priority=10, block=True)
-random_cmd = on_command("贴", priority=9, block=False)
 stick_cmd = on_command("贴", priority=10, block=True)
 
-# 匹配 "贴<数字>个" 中的数字部分
 _RANDOM_RE = re.compile(r"^(\d+)个$")
 
 
-def _resolve_emoji(text: str) -> dict | None:
-    """根据用户输入（id / 含义 / emoji 字符）查找对应的表情条目"""
-    if text in _BY_ID:
-        return _BY_ID[text]
+def _resolve_emoji(text: str) -> str | None:
+    """根据用户输入解析出 emoji_id；支持已收录的 id/含义/emoji 和任意纯数字 ID"""
     if text in _BY_NAME:
-        return _BY_NAME[text]
+        return _BY_NAME[text]["id"]
     if text in _BY_EMOJI:
-        return _BY_EMOJI[text]
+        return _BY_EMOJI[text]["id"]
+    if text in _BY_ID:
+        return _BY_ID[text]["id"]
+    if text.isdigit():
+        return text
     return None
 
 
@@ -107,101 +110,53 @@ async def handle_emoji_list(bot: Bot, event: GroupMessageEvent):
     await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
 
 
-# ==================== /贴<数字>个 ====================
-@random_cmd.handle()
-async def handle_random(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
-    """给引用的消息随机贴指定个数的表情"""
-    text = args.extract_plain_text().strip()
-    m = _RANDOM_RE.match(text)
-    if not m:
-        # 不是 "N个" 格式，跳过让下一个 handler 处理
-        return
-
-    if not event.reply:
-        await random_cmd.finish("请引用一条消息再使用此命令哦~")
-
-    count = int(m.group(1))
-    if count < 1:
-        await random_cmd.finish("数量至少为 1 哦~")
-    if count > MAX_RANDOM_COUNT:
-        await random_cmd.finish(f"一次最多贴 {MAX_RANDOM_COUNT} 个表情~")
-
-    target_msg_id = event.reply.message_id
-    chosen = random.sample(EMOJI_LIST, min(count, len(EMOJI_LIST)))
-    success = []
-    for emoji_entry in chosen:
-        try:
-            await bot.call_api(
-                "set_msg_emoji_like",
-                message_id=target_msg_id,
-                emoji_id=emoji_entry["id"],
-            )
-            success.append(emoji_entry)
-        except Exception:
-            pass
-        await asyncio.sleep(0.3)
-
-    if success:
-        names = "、".join(
-            (e.get("emoji", "") + e["name"]) for e in success
-        )
-        await random_cmd.finish(f"已随机贴上 {len(success)} 个表情：{names}")
-    else:
-        await random_cmd.finish("贴表情失败了，请稍后再试~")
-
-
-# ==================== /贴 <表情> ====================
+# ==================== /贴 ====================
 @stick_cmd.handle()
 async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
-    """给引用的消息贴指定表情"""
+    """统一处理 /贴N个 和 /贴<表情>"""
     if not event.reply:
-        await stick_cmd.finish("请引用一条消息再使用此命令哦~")
+        return
 
     target_msg_id = event.reply.message_id
     text = args.extract_plain_text().strip()
-
     if not text:
-        await stick_cmd.finish(
-            "请指定要贴的表情，例如：\n"
-            "  /贴 赞\n"
-            "  /贴 76\n"
-            "  /贴 👍\n"
-            "  /贴3个  (随机贴3个)"
+        return
+
+    # 优先匹配 "N个" → 随机贴
+    m = _RANDOM_RE.match(text)
+    if m:
+        cfg = _load_config()
+        max_random = cfg.get("max_random_count", 20)
+        max_id = cfg.get("max_emoji_id", 470)
+        count = min(int(m.group(1)), max_random)
+        if count < 1:
+            return
+        ids = random.sample(range(1, max_id + 1), count)
+        for eid in ids:
+            try:
+                await bot.call_api(
+                    "set_msg_emoji_like",
+                    message_id=target_msg_id,
+                    emoji_id=str(eid),
+                )
+            except Exception:
+                pass
+            await asyncio.sleep(0.3)
+        return
+
+    # 指定表情
+    emoji_id = _resolve_emoji(text)
+    if not emoji_id:
+        return
+
+    try:
+        await bot.call_api(
+            "set_msg_emoji_like",
+            message_id=target_msg_id,
+            emoji_id=emoji_id,
         )
-
-    # 先查已收录的表情（按 name、emoji、id 匹配）
-    entry = _resolve_emoji(text)
-    if entry:
-        try:
-            await bot.call_api(
-                "set_msg_emoji_like",
-                message_id=target_msg_id,
-                emoji_id=entry["id"],
-            )
-        except Exception as e:
-            await stick_cmd.finish(f"贴表情失败：{e}")
-
-        display = entry.get("emoji", "") + entry["name"]
-        await stick_cmd.finish(f"已贴上「{display}」~")
-        return
-
-    # 未收录但是纯数字 → 当作未收录的表情 ID 直接尝试
-    if text.isdigit():
-        try:
-            await bot.call_api(
-                "set_msg_emoji_like",
-                message_id=target_msg_id,
-                emoji_id=text,
-            )
-        except Exception as e:
-            await stick_cmd.finish(f"贴表情失败（ID: {text}）：{e}")
-
-        await stick_cmd.finish(f"已贴上表情 ID {text}~")
-        return
-
-    await stick_cmd.finish(
-        f"找不到表情「{text}」，请使用 /贴表情列表 查看可用表情~"
-    )
+    except Exception:
+        pass
 
 
 # ==================== 工具函数 ====================

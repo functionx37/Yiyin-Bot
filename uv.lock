@@ -438,6 +438,34 @@ wheels = [
 ]
 
 [[package]]
+name = "cookit"
+version = "0.13.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/79/6b/17603fa03bbd5a2d839c816a54616525a39e14eb00627351bd0651f26de9/cookit-0.13.3.tar.gz", hash = "sha256:5e34bbd24f9ec5cdb89f68bdcbba0f871742e119ce44ee49605363d02b806b3b", size = 36724, upload-time = "2025-10-30T17:19:52.886Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/1d/4f66a33c99ced36993fcfee0c150771bdc6d0e0e1538e316586a4db58692/cookit-0.13.3-py3-none-any.whl", hash = "sha256:5c30042c2dc2dcac7db5a9faa711a7f7200260a400ea20652327b0d99446d61c", size = 31170, upload-time = "2025-10-30T17:19:51.808Z" },
+]
+
+[package.optional-dependencies]
+loguru = [
+    { name = "loguru" },
+]
+nonebot-alconna = [
+    { name = "nonebot-plugin-alconna" },
+    { name = "nonebot2" },
+]
+nonebot-localstore = [
+    { name = "nonebot-plugin-localstore" },
+    { name = "nonebot2" },
+]
+pydantic = [
+    { name = "pydantic" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1567,6 +1595,25 @@ wheels = [
 ]
 
 [[package]]
+name = "nonebot-plugin-meme-stickers"
+version = "0.2.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cookit", extra = ["loguru", "nonebot-alconna", "nonebot-localstore", "pydantic"] },
+    { name = "httpx" },
+    { name = "nonebot-plugin-alconna" },
+    { name = "nonebot-plugin-localstore" },
+    { name = "nonebot-plugin-waiter" },
+    { name = "nonebot2" },
+    { name = "skia-python" },
+    { name = "tenacity" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bb/69/8f875e9298929a002028ef4103d1083e4585bf56dd3e9a19830e700f9624/nonebot_plugin_meme_stickers-0.2.8.tar.gz", hash = "sha256:ca4174b704fc541860feae2257121dace0f9ee6e941c1c9c9fc3798c70c347ad", size = 35512, upload-time = "2025-05-12T08:11:51.299Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/f5/6065911fe524cb79c0a43d12a3eb10681ba0c6d69422b3bd241d66ed2d68/nonebot_plugin_meme_stickers-0.2.8-py3-none-any.whl", hash = "sha256:a63239cefb6cd94c5edd035abe475ad00f436c92cc971df8ddfe42a645204061", size = 43982, upload-time = "2025-05-12T08:11:49.988Z" },
+]
+
+[[package]]
 name = "nonebot-plugin-memes"
 version = "0.8.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2152,6 +2199,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pybind11"
+version = "3.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/98/9118a0659646f1628c592ef9bb48e0056efa6bf27c951fd12a178e0136fb/pybind11-3.0.2.tar.gz", hash = "sha256:432f01aeb68e361a3a7fc7575c2c7f497595bf640f747acd909ff238dd766e06", size = 577131, upload-time = "2026-02-17T04:46:52.556Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/c5/e98d9c51f3d5300d5e40ad9037dd6b3b60736fd02ab68dcc98c96be7592d/pybind11-3.0.2-py3-none-any.whl", hash = "sha256:f8a6500548919cc33bcd220d5f984688326f574fa97f1107f2f4fdb4c6fb019f", size = 310158, upload-time = "2026-02-17T04:46:49.91Z" },
+]
+
+[[package]]
 name = "pydantic"
 version = "2.12.5"
 source = { registry = "https://pypi.org/simple" }
@@ -2458,6 +2514,41 @@ wheels = [
 ]
 
 [[package]]
+name = "skia-python"
+version = "138.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pybind11" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b3/e7/1f80fb8e96f835023cda9a1303e19998fc44dd788de1b4e378f76fbff1fb/skia_python-138.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:a8bcf4f8d6ea08bdf718ed257f9a9c722f643223f9b93230fd4c15ac5c82029f", size = 11730779, upload-time = "2025-06-09T14:00:32.012Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/3e/5e58e64ba620be4b5c5a216503d79cd42d03b9de21642120bb6fe8f602c4/skia_python-138.0-cp310-cp310-macosx_11_0_x86_64.whl", hash = "sha256:1b7f24a5b306f57d75b8733658189dd61ce9114a84b5d119b3b1fb09cbc991cb", size = 12110997, upload-time = "2025-06-09T14:00:34.683Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/a8/7d36ed3e3ce5d8a31b268c3ad7037441f587ca21d7260c6210a4849038d6/skia_python-138.0-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:2c4164013355bcf255651ac8a0ca519fd6095b6e58fa5e7a057919bec158411d", size = 13244564, upload-time = "2025-06-09T14:00:36.895Z" },
+    { url = "https://files.pythonhosted.org/packages/da/09/880f8aec9b84fdeddf156bf1e19e22688a1615c7323a2c12990c66185cb3/skia_python-138.0-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:63a7f9dc8d5fdda969f35d7f8f3a774029093468a9c06771ccce9ab967b275ca", size = 13732684, upload-time = "2025-06-09T14:00:39.903Z" },
+    { url = "https://files.pythonhosted.org/packages/60/19/453965549c3d60f820d4370d47bd0775071702051d5bdba6c20f6014fcf2/skia_python-138.0-cp310-cp310-win_amd64.whl", hash = "sha256:740104424e9c94a70a767adcdbfa2bce131c93a82fa00a50432406dc04bac7e8", size = 10719458, upload-time = "2025-06-09T14:00:42.939Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/e9/ef5017013792bde58385b970e10cad1266643651a8438ad034b630d9fb5d/skia_python-138.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:6e369105b2811b6c32d7f15624202609deeb428164ee395c715df01221c847f5", size = 11733172, upload-time = "2025-06-09T14:00:45.592Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/a5/a97952c796da12bce860d2664f796a60951ee893264723019c5a33ebfe92/skia_python-138.0-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:55a2ae437d1c6dc46d9bbc2e3e0b4b5642022dcebc0634591ae1c8acea52a413", size = 12111725, upload-time = "2025-06-09T14:00:49.457Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/a5/41eb0ca82a100ee96505899d7c85ab19de8a22def6d0e696111d519f103f/skia_python-138.0-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:e67c9bcac953fbeb31b38474a4e566371e5719d4e27032686359cbe602819af8", size = 13246160, upload-time = "2025-06-09T14:00:52.21Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/d0/2079f4e9774117cdbb67fdbbb31fc29095d69d52d47fd7cf01d51e6429a2/skia_python-138.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:4e9fb097849604e290be28a6b4cc29cb0079b0233e599c2f6b2ec635e47169d2", size = 13733938, upload-time = "2025-06-09T14:00:54.764Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/e7/5588e80336e6999dda9367a1522a71a7163d3e42f143b4aa29ac7beff270/skia_python-138.0-cp311-cp311-win_amd64.whl", hash = "sha256:df5a0dd52e1038423f2e1c03677cba5ea974d215adec10763dd855f4a6ca0cfc", size = 10718923, upload-time = "2025-06-09T14:00:57.429Z" },
+    { url = "https://files.pythonhosted.org/packages/85/60/a74af40c88b72772560be8c8016540ae21e923160e3f1e8f8303aefc42d9/skia_python-138.0-cp311-cp311-win_arm64.whl", hash = "sha256:054ca430003d52468974cf69d98719e61f188630709a3706a868efc16e817970", size = 10236223, upload-time = "2025-06-09T14:00:59.615Z" },
+    { url = "https://files.pythonhosted.org/packages/03/c9/6918a25edd8cf2982a39d70e7fe833d553a8d05dbd27bf6584f035d4eb06/skia_python-138.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:6b83d7b8101038ab0fcb920b1a91c872615e45b0ac19fe0c66b55d3ad0d61970", size = 11810205, upload-time = "2025-06-09T14:01:01.781Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/1c/8eb0b30088cf61c50443a9bbe59bab29696d3a316b7c7571cec4a048fd7b/skia_python-138.0-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:f22060f513b2fc258b4269e631128ca68889107bc4aa65255119f3d9c1c32993", size = 12198501, upload-time = "2025-06-09T14:01:04.036Z" },
+    { url = "https://files.pythonhosted.org/packages/4b/d2/b3741e023011f37d6e337254ba13b120de080561f658d784ca1ca9460db8/skia_python-138.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:02b0c2146d25f45224c2c156dd8b859e89265ee5894c3fa8f456c6c41b27122d", size = 13228949, upload-time = "2025-06-09T14:01:06.431Z" },
+    { url = "https://files.pythonhosted.org/packages/94/f0/ea63dbd27f1d7d3a089e32750b082e6bcb4ca7716670be33207bdc4b5e8a/skia_python-138.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:fb9e980a61defcb6ca19d73c97ea23d1aea633a82e9d1dead6ed259c3856baaf", size = 13716695, upload-time = "2025-06-09T14:01:08.735Z" },
+    { url = "https://files.pythonhosted.org/packages/23/e9/9acf2197c77d2a90c3b070d1b578245a4332f19b708e8099cea74edc4d0b/skia_python-138.0-cp312-cp312-win_amd64.whl", hash = "sha256:625bb95dc225ea2257f1d1f7b0aee203290b91d909c8f5feaa7cd428f13bce22", size = 10730248, upload-time = "2025-06-09T14:01:10.931Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/87/dc95a0086dfb210dad20adf3446b1bd85958e190a7e3409db468fb1e8d7f/skia_python-138.0-cp312-cp312-win_arm64.whl", hash = "sha256:e495143edba2a7cdf59e83723f00c9a247e5baeda4981fc6587803ed46c5ed2a", size = 10240328, upload-time = "2025-06-09T14:01:13.491Z" },
+    { url = "https://files.pythonhosted.org/packages/45/93/d27a1b494ee40ee9a34cb1a497a16e158088e39f0acb76b36018a5974e7c/skia_python-138.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:1433b5a0bd4ca1c1d050541f54c25d27d55a129894dbd827d4e440697090ff83", size = 11810860, upload-time = "2025-06-09T14:01:15.754Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/51/e07fd27e07c206c96b85d5b1bf7f143cc23152578392085e4e7a541e39c6/skia_python-138.0-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:3f053128aa6344fa991c2485f29f40bda77b5f46467a43e778a34ec8f5b3615a", size = 12198469, upload-time = "2025-06-09T14:01:17.891Z" },
+    { url = "https://files.pythonhosted.org/packages/12/26/65f991bf4dee40fecb4027e1ee7cc1dacaff2dfa258d47e86af6ae83d8dd/skia_python-138.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:878212d9576d065a45fd143c57d412bc0496c6594ecfcd9cc2cd93b4fd943cb4", size = 13229490, upload-time = "2025-06-09T14:01:21.869Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/2e/5c593bdadaf4c84580af8a46853079a8f0055506a826b1e45ea84baaa816/skia_python-138.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:a6b3e58756a9fa8af3714edc05aeafc7922090f5a276c4be11337f252921dbe8", size = 13717865, upload-time = "2025-06-09T14:01:24.049Z" },
+    { url = "https://files.pythonhosted.org/packages/be/d9/b112d8f20e28dde3bbf47574d330b42d1dc4daf73650676b966f356f2f8c/skia_python-138.0-cp313-cp313-win_amd64.whl", hash = "sha256:f2d596d5807fafef6bc43440f4df28f71db189f9e2cfb8613224713916837e3c", size = 10730715, upload-time = "2025-06-09T14:01:26.222Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/1b/32301010348c72de22f03b4322324937de461f8c906e5c2ec10d0b98ac3b/skia_python-138.0-cp313-cp313-win_arm64.whl", hash = "sha256:20285bf4ee41da754b842c80076fc4a240cb3801f4a1cbbb50b26a5dca1ebc39", size = 10239877, upload-time = "2025-06-09T14:01:28.412Z" },
+]
+
+[[package]]
 name = "sqlalchemy"
 version = "2.0.46"
 source = { registry = "https://pypi.org/simple" }
@@ -2642,6 +2733,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/62/e0/eb0be8cc52c79351b0e498233a25b6bf73df850ac4b2a2a0f271a22f4ece/tarina-0.7.3-cp314-cp314-win_amd64.whl", hash = "sha256:c85d5920ac29c3f0be681f6e68a0e92f3cd103afe6da8b04db91bc9e59386210", size = 99119, upload-time = "2025-09-09T08:25:06.634Z" },
     { url = "https://files.pythonhosted.org/packages/30/f7/32d4f269c8ff36ebb95592299fc5a60bb335bb898f6f840987cbe4c2b1bb/tarina-0.7.3-cp314-cp314-win_arm64.whl", hash = "sha256:94e7f2936d82736a213cd540ddd1bd6a2f32531b46e77fc464eccf7bf40e7984", size = 92020, upload-time = "2025-09-09T08:25:07.759Z" },
     { url = "https://files.pythonhosted.org/packages/3a/28/5acb5af9b49403954341982e077ec91c51fd5406b37b7fa3887191e1e44c/tarina-0.7.3-py3-none-any.whl", hash = "sha256:f9636e30416ccef9a528d654ffc4495c6a226ae7c38e6f3a6ebed31c6075d335", size = 48360, upload-time = "2025-09-09T08:25:32.895Z" },
+]
+
+[[package]]
+name = "tenacity"
+version = "9.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
 ]
 
 [[package]]
@@ -3278,6 +3378,7 @@ dependencies = [
     { name = "nonebot-plugin-datastore" },
     { name = "nonebot-plugin-emojimix" },
     { name = "nonebot-plugin-fakemsg" },
+    { name = "nonebot-plugin-meme-stickers" },
     { name = "nonebot-plugin-memes" },
     { name = "nonebot-plugin-orm", extra = ["default"] },
     { name = "nonebot-plugin-wordcloud" },
@@ -3294,6 +3395,7 @@ requires-dist = [
     { name = "nonebot-plugin-datastore", specifier = ">=1.0.0" },
     { name = "nonebot-plugin-emojimix", specifier = ">=0.4.1" },
     { name = "nonebot-plugin-fakemsg", specifier = ">=0.1.9" },
+    { name = "nonebot-plugin-meme-stickers", specifier = ">=0.2.8" },
     { name = "nonebot-plugin-memes", specifier = ">=0.8.1" },
     { name = "nonebot-plugin-orm", extras = ["default"], specifier = ">=0.8.3" },
     { name = "nonebot-plugin-wordcloud", specifier = ">=0.9.0" },

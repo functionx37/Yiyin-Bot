@@ -80,6 +80,10 @@
             {
                 "command": "<emoji>+<emoji>",
                 "description": "合成emoji"
+            },
+            {
+                "command": "pjsk/arc",
+                "description": "生成对应风格表情包"
             }
         ]
     },

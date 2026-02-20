@@ -17,6 +17,7 @@ dependencies = [
     "nonebot-plugin-anime-trace>=0.2.3",
     "nonebot-plugin-fakemsg>=0.1.9",
     "nonebot-plugin-datastore>=1.0.0",
+    "nonebot-plugin-meme-stickers>=0.2.8",
 ]
 
 [tool.nonebot]
@@ -37,3 +38,4 @@ nonebot-plugin-wordcloud = ["nonebot_plugin_wordcloud"]
 nonebot_plugin_emojimix = ["nonebot_plugin_emojimix"]
 nonebot-plugin-anime-trace = ["nonebot_plugin_anime_trace"]
 nonebot-plugin-fakemsg = ["nonebot_plugin_fakemsg"]
+nonebot-plugin-meme-stickers = ["nonebot_plugin_meme_stickers"]

@@ -12,9 +12,11 @@
     "emoji_reaction": "贴表情"
   },
   "optin": {
-    "world_notify": "世界通知",
-    "mohe": "摩诃",
     "roleplay": "角色扮演",
     "nonebot_plugin_fakemsg": "伪造消息"
+  },
+  "hidden": {
+    "world_notify": "世界通知",
+    "mohe": "摩诃"
   }
 }

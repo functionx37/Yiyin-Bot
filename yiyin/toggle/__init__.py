@@ -4,9 +4,10 @@ NoneBot2 功能开关管理插件
 - 命令：/启用 <功能名>   — 在当前群启用指定功能（仅管理员/群主）
 - 命令：/禁用 <功能名>   — 在当前群禁用指定功能（仅管理员/群主）
 - 原理：通过 run_preprocessor 全局拦截，对已禁用的插件直接忽略
-- 支持两种功能类型：
+- 支持三种功能类型：
   - 插件级功能（默认启用，可禁用）
   - Opt-in 功能（默认关闭，需手动启用）
+  - 隐藏功能（默认关闭，需手动启用，不在功能列表和提示中展示）
 """
 
 import json
@@ -32,20 +33,27 @@ CONFIG_PATH = PROJECT_ROOT / "data" / "toggle" / "config.json"
 FEATURES_PATH = PROJECT_ROOT / "config" / "features.json"
 
 # ==================== 从外部配置加载功能注册表 ====================
-# config/features.json 中 "plugins" 为默认启用可禁用的插件，"optin" 为默认关闭需手动启用的功能
+# config/features.json 中：
+#   "plugins" — 默认启用可禁用的插件
+#   "optin"   — 默认关闭需手动启用的功能
+#   "hidden"  — 默认关闭需手动启用，且不在功能列表和提示中展示
 # 新增插件时，编辑 config/features.json 即可纳入开关管理
 with open(FEATURES_PATH, "r", encoding="utf-8") as _f:
     _features = json.load(_f)
 
 PLUGIN_REGISTRY: dict[str, str] = _features.get("plugins", {})
 OPTIN_REGISTRY: dict[str, str] = _features.get("optin", {})
+HIDDEN_REGISTRY: dict[str, str] = _features.get("hidden", {})
 
 # 反向映射：中文功能名 -> 模块名 / 功能标识（用于命令参数解析）
 _DISPLAY_TO_MODULE: dict[str, str] = {v: k for k, v in PLUGIN_REGISTRY.items()}
 _DISPLAY_TO_OPTIN: dict[str, str] = {v: k for k, v in OPTIN_REGISTRY.items()}
+_DISPLAY_TO_HIDDEN: dict[str, str] = {v: k for k, v in HIDDEN_REGISTRY.items()}
 
-# 插件级功能名列表（用于错误提示，不含默认禁用的 opt-in 功能）
-_PLUGIN_DISPLAY_NAMES: list[str] = list(PLUGIN_REGISTRY.values())
+# 可见功能名列表（用于错误提示和功能列表，不含隐藏功能）
+_VISIBLE_DISPLAY_NAMES: list[str] = list(PLUGIN_REGISTRY.values()) + list(
+    OPTIN_REGISTRY.values()
+)
 
 # 本插件名称，不可被禁用
 _SELF_PLUGIN = "toggle"
@@ -110,7 +118,7 @@ def _get_plugin_key(matcher: Matcher) -> str | None:
         return None
     name = plugin.name
 
-    _all_keys = PLUGIN_REGISTRY | OPTIN_REGISTRY
+    _all_keys = PLUGIN_REGISTRY | OPTIN_REGISTRY | HIDDEN_REGISTRY
     if name in _all_keys:
         return name
     for key in _all_keys:
@@ -136,14 +144,24 @@ async def toggle_check(matcher: Matcher, event: Event):
     # 本插件或未注册插件不做拦截
     if plugin_key is None or plugin_key == _SELF_PLUGIN:
         return
-    if plugin_key not in PLUGIN_REGISTRY:
-        return
 
     group_id = str(event.group_id)
-    if _is_disabled(plugin_key, group_id):
-        raise IgnoredException(
-            f"插件「{PLUGIN_REGISTRY[plugin_key]}」在群 {group_id} 已被禁用"
-        )
+
+    # 插件级功能：默认启用，检查是否被禁用
+    if plugin_key in PLUGIN_REGISTRY:
+        if _is_disabled(plugin_key, group_id):
+            raise IgnoredException(
+                f"插件「{PLUGIN_REGISTRY[plugin_key]}」在群 {group_id} 已被禁用"
+            )
+        return
+
+    # Opt-in / 隐藏功能：默认关闭，检查是否已启用
+    _optin_and_hidden = OPTIN_REGISTRY | HIDDEN_REGISTRY
+    if plugin_key in _optin_and_hidden:
+        if not is_feature_enabled(plugin_key, group_id):
+            raise IgnoredException(
+                f"功能「{_optin_and_hidden[plugin_key]}」在群 {group_id} 未启用"
+            )
 
 
 # ==================== 注册命令 ====================
@@ -195,15 +213,15 @@ async def handle_enable(
     name = args.extract_plain_text().strip()
     if not name:
         await enable_cmd.finish(
-            f"请指定要启用的功能名，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+            f"请指定要启用的功能名，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
         )
 
     module_key = _DISPLAY_TO_MODULE.get(name)
-    optin_key = _DISPLAY_TO_OPTIN.get(name)
+    optin_key = _DISPLAY_TO_OPTIN.get(name) or _DISPLAY_TO_HIDDEN.get(name)
 
     if module_key is None and optin_key is None:
         await enable_cmd.finish(
-            f"未知功能「{name}」，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+            f"未知功能「{name}」，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
         )
 
     group_id = str(event.group_id)
@@ -239,15 +257,15 @@ async def handle_disable(
     name = args.extract_plain_text().strip()
     if not name:
         await disable_cmd.finish(
-            f"请指定要禁用的功能名，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+            f"请指定要禁用的功能名，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
         )
 
     module_key = _DISPLAY_TO_MODULE.get(name)
-    optin_key = _DISPLAY_TO_OPTIN.get(name)
+    optin_key = _DISPLAY_TO_OPTIN.get(name) or _DISPLAY_TO_HIDDEN.get(name)
 
     if module_key is None and optin_key is None:
         await disable_cmd.finish(
-            f"未知功能「{name}」，可用功能：{'、'.join(_PLUGIN_DISPLAY_NAMES)}"
+            f"未知功能「{name}」，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
         )
 
     group_id = str(event.group_id)

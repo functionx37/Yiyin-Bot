@@ -53,11 +53,6 @@ random_mohe_cmd = on_command("随机摩诃", priority=10, block=True)
 @random_mohe_cmd.handle()
 async def handle_random_mohe(bot: Bot, event: GroupMessageEvent):
     """处理 /随机摩诃 命令：逐条发送 3-5 条随机摩诃语录"""
-    group_id = str(event.group_id)
-
-    if not is_feature_enabled("mohe", group_id):
-        await random_mohe_cmd.finish("摩诃功能未启用，请管理员使用 /启用 摩诃 开启")
-
     count = random.randint(3, 5)
     selected = random.sample(MOHE_DATA, min(count, len(MOHE_DATA)))
 

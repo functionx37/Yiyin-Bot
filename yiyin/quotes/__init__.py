@@ -7,11 +7,13 @@ NoneBot2 群友语录插件
 - 命令：/截图上传 <群友昵称> [引用消息]
 - 命令：/查看 <群友昵称>
 - 命令：/随机群友
+- 命令：/删除语录 <ID>（仅超级管理员）
 - 功能：记录并随机查看群友的发言截图
 """
 
 import json
 import random
+import string
 import uuid
 from pathlib import Path
 
@@ -19,6 +21,7 @@ import httpx
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
+from nonebot.permission import SUPERUSER
 
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -92,6 +95,85 @@ def _resolve_name(group_id: str, name: str) -> str | None:
     return None
 
 
+def _get_index_file(group_id: str) -> Path:
+    """获取群组语录索引文件路径"""
+    return _get_group_dir(group_id) / "index.json"
+
+
+def _generate_short_id(existing_ids: set[str]) -> str:
+    """生成6位字母数字组合的唯一短ID"""
+    chars = string.ascii_letters + string.digits
+    while True:
+        short_id = "".join(random.choices(chars, k=6))
+        if short_id not in existing_ids:
+            return short_id
+
+
+def _load_index(group_id: str) -> dict[str, dict]:
+    """加载语录索引 {short_id: {"member": str, "filename": str}}，
+    首次加载时自动为已有图片生成索引。"""
+    index_file = _get_index_file(group_id)
+    if index_file.exists():
+        with open(index_file, "r", encoding="utf-8") as f:
+            index = json.load(f)
+    else:
+        index = {}
+
+    indexed_files: set[str] = set()
+    for entry in index.values():
+        indexed_files.add(f"{entry['member']}/{entry['filename']}")
+
+    images_dir = _get_group_dir(group_id) / "images"
+    changed = False
+    if images_dir.exists():
+        existing_ids = set(index.keys())
+        for member_dir in images_dir.iterdir():
+            if not member_dir.is_dir():
+                continue
+            member_name = member_dir.name
+            for img_file in member_dir.glob("*.*"):
+                key = f"{member_name}/{img_file.name}"
+                if key not in indexed_files:
+                    short_id = _generate_short_id(existing_ids)
+                    existing_ids.add(short_id)
+                    index[short_id] = {
+                        "member": member_name,
+                        "filename": img_file.name,
+                    }
+                    changed = True
+
+    if changed:
+        _save_index(group_id, index)
+    return index
+
+
+def _save_index(group_id: str, index: dict[str, dict]) -> None:
+    """保存语录索引"""
+    index_file = _get_index_file(group_id)
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(index_file, "w", encoding="utf-8") as f:
+        json.dump(index, f, ensure_ascii=False, indent=2)
+
+
+def _add_to_index(group_id: str, member: str, filename: str) -> str:
+    """向索引中添加一条记录，返回生成的短ID"""
+    index = _load_index(group_id)
+    existing_ids = set(index.keys())
+    short_id = _generate_short_id(existing_ids)
+    index[short_id] = {"member": member, "filename": filename}
+    _save_index(group_id, index)
+    return short_id
+
+
+def _find_id_by_filepath(group_id: str, member: str, filename: str) -> str | None:
+    """通过成员名和文件名查找短ID"""
+    index = _load_index(group_id)
+    for short_id, entry in index.items():
+        if entry["member"] == member and entry["filename"] == filename:
+            return short_id
+    return None
+
+
 async def _extract_images(
     bot: Bot, event: GroupMessageEvent, args: Message
 ) -> list[MessageSegment]:
@@ -140,6 +222,9 @@ upload_cmd = on_command("上传", priority=10, block=True)
 screenshot_upload_cmd = on_command("截图上传", priority=10, block=True)
 view_cmd = on_command("查看", priority=10, block=True)
 random_member_cmd = on_command("随机群友", priority=10, block=True)
+delete_quote_cmd = on_command(
+    "删除语录", priority=10, block=True, permission=SUPERUSER
+)
 
 
 # ==================== 命令处理 ====================
@@ -263,7 +348,7 @@ async def handle_upload(
     image_dir = _get_member_image_dir(group_id, canonical)
     image_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_count = 0
+    saved_ids: list[str] = []
     async with httpx.AsyncClient() as client:
         for img_seg in images:
             url = img_seg.data.get("url")
@@ -275,16 +360,19 @@ async def handle_upload(
                 filename = f"{uuid.uuid4().hex}.png"
                 filepath = image_dir / filename
                 filepath.write_bytes(resp.content)
-                saved_count += 1
+                short_id = _add_to_index(group_id, canonical, filename)
+                saved_ids.append(short_id)
             except Exception:
                 continue
 
-    if saved_count == 0:
+    if not saved_ids:
         await upload_cmd.finish("图片下载失败，请稍后重试")
 
     prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
+    id_str = "、".join(saved_ids)
     await upload_cmd.finish(
-        f"{prefix}已成功为群友「{canonical}」保存 {saved_count} 张语录截图✓"
+        f"{prefix}已成功为群友「{canonical}」保存 {len(saved_ids)} 张语录截图✓\n"
+        f"语录ID：{id_str}"
     )
 
 
@@ -389,12 +477,14 @@ async def handle_screenshot_upload(
 
     image_dir = _get_member_image_dir(group_id, canonical)
     image_dir.mkdir(parents=True, exist_ok=True)
-    filepath = image_dir / f"{uuid.uuid4().hex}.png"
+    filename = f"{uuid.uuid4().hex}.png"
+    filepath = image_dir / filename
     filepath.write_bytes(screenshot_bytes)
+    short_id = _add_to_index(group_id, canonical, filename)
 
     prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
     msg = MessageSegment.text(
-        f"{prefix}已为群友「{canonical}」生成并保存截图✓\n"
+        f"{prefix}已为群友「{canonical}」生成并保存截图✓\n语录ID：{short_id}\n"
     ) + MessageSegment.image(screenshot_bytes)
     await screenshot_upload_cmd.finish(msg)
 
@@ -431,9 +521,11 @@ async def handle_view(
     chosen = random.choice(image_files)
     image_bytes = chosen.read_bytes()
 
-    msg = MessageSegment.text(f"群友「{canonical}」的语录：\n") + MessageSegment.image(
-        image_bytes
-    )
+    short_id = _find_id_by_filepath(group_id, canonical, chosen.name)
+    id_hint = f"（ID：{short_id}）" if short_id else ""
+    msg = MessageSegment.text(
+        f"群友「{canonical}」的语录{id_hint}：\n"
+    ) + MessageSegment.image(image_bytes)
     await view_cmd.finish(msg)
 
 
@@ -463,7 +555,40 @@ async def handle_random_member(bot: Bot, event: GroupMessageEvent):
     chosen_name, chosen_file = random.choice(all_quotes)
     image_bytes = chosen_file.read_bytes()
 
+    short_id = _find_id_by_filepath(group_id, chosen_name, chosen_file.name)
+    id_hint = f"（ID：{short_id}）" if short_id else ""
     msg = MessageSegment.text(
-        f"随机抽到了群友「{chosen_name}」的语录：\n"
+        f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
     ) + MessageSegment.image(image_bytes)
     await random_member_cmd.finish(msg)
+
+
+@delete_quote_cmd.handle()
+async def handle_delete_quote(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    """处理 /删除语录 命令（仅超级管理员）"""
+    quote_id = args.extract_plain_text().strip()
+    if not quote_id:
+        await delete_quote_cmd.finish("请输入要删除的语录ID，例如：/删除语录 Ab3x9K")
+
+    group_id = str(event.group_id)
+    index = _load_index(group_id)
+
+    if quote_id not in index:
+        await delete_quote_cmd.finish(f"语录ID「{quote_id}」不存在，请检查后重试")
+
+    entry = index[quote_id]
+    member = entry["member"]
+    filename = entry["filename"]
+
+    filepath = _get_member_image_dir(group_id, member) / filename
+    if filepath.exists():
+        filepath.unlink()
+
+    del index[quote_id]
+    _save_index(group_id, index)
+
+    await delete_quote_cmd.finish(
+        f"已删除群友「{member}」的语录（ID：{quote_id}）✓"
+    )

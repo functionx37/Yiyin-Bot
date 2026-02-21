@@ -1,5 +1,6 @@
 """
-聊天截图生成模块 — 使用 Pillow 绘制模拟 QQ 群聊风格的单条消息截图
+聊天截图生成模块 — 使用 Pillow + pilmoji 绘制模拟 QQ 群聊风格的单条消息截图
+pilmoji 自动将 emoji 渲染为图片叠加到画布上，解决 CJK 字体缺少 emoji 字形的问题。
 """
 
 import asyncio
@@ -7,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+from pilmoji import Pilmoji
 
 _FONT_SEARCH_PATHS = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -46,20 +48,48 @@ def _circle_crop(img: Image.Image, size: int) -> Image.Image:
     return img
 
 
-def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+_ZWJ = 0x200D
+_VS15 = 0xFE0E
+_VS16 = 0xFE0F
+_COMBINING_CODEPOINTS = frozenset({_ZWJ, _VS15, _VS16})
+
+
+def _char_width(ch: str, font: ImageFont.FreeTypeFont, emoji_w: float) -> float:
+    """获取单个字符的渲染宽度。
+    对 ZWJ / 变体选择符返回 0；对字体中缺失的非 ASCII 字符按 emoji 宽度估算。"""
+    cp = ord(ch)
+    if cp in _COMBINING_CODEPOINTS or 0xE0020 <= cp <= 0xE007F:
+        return 0
+    w = font.getlength(ch)
+    if w < 1 and cp > 255:
+        return emoji_w
+    return w
+
+
+def _measure_line(text: str, font: ImageFont.FreeTypeFont, emoji_w: float) -> float:
+    return sum(_char_width(ch, font, emoji_w) for ch in text)
+
+
+def _wrap_text(
+    text: str, font: ImageFont.FreeTypeFont, max_width: int, emoji_w: float
+) -> list[str]:
     lines: list[str] = []
     for paragraph in text.split("\n"):
         if not paragraph:
             lines.append("")
             continue
         buf = ""
+        current_w = 0.0
         for ch in paragraph:
-            if font.getlength(buf + ch) > max_width:
+            ch_w = _char_width(ch, font, emoji_w)
+            if current_w + ch_w > max_width:
                 if buf:
                     lines.append(buf)
                 buf = ch
+                current_w = ch_w
             else:
                 buf += ch
+                current_w += ch_w
         if buf:
             lines.append(buf)
     return lines or [""]
@@ -91,12 +121,13 @@ def generate_chat_screenshot(
 ) -> bytes:
     nick_font = _get_font(_NICK_FONT_SIZE)
     text_font = _get_font(_TEXT_FONT_SIZE)
+    emoji_w = float(_TEXT_FONT_SIZE)
 
-    wrapped = _wrap_text(text, text_font, _MAX_TEXT_W)
+    wrapped = _wrap_text(text, text_font, _MAX_TEXT_W, emoji_w)
 
     ascent, descent = text_font.getmetrics()
     line_h = ascent + descent
-    max_line_w = max(text_font.getlength(ln if ln else " ") for ln in wrapped)
+    max_line_w = max(_measure_line(ln if ln else " ", text_font, emoji_w) for ln in wrapped)
     text_block_h = line_h * len(wrapped) + _LINE_GAP * max(len(wrapped) - 1, 0)
 
     nick_asc, nick_desc = nick_font.getmetrics()
@@ -120,9 +151,6 @@ def generate_chat_screenshot(
     circle_ava = _circle_crop(ava, _AVATAR_SIZE)
     canvas.paste(circle_ava, (_AVATAR_X, _TOP_PAD), circle_ava)
 
-    # Nickname
-    draw.text((_MSG_X, _TOP_PAD), nickname, font=nick_font, fill=_NICK_COLOR)
-
     # Bubble
     bub_y = _TOP_PAD + nick_h + gap_nb
     draw.rounded_rectangle(
@@ -138,13 +166,16 @@ def generate_chat_screenshot(
         fill=_BUBBLE_COLOR,
     )
 
-    # Text
-    tx = _MSG_X + _BUBBLE_PH
-    ty = bub_y + _BUBBLE_PV
-    for line in wrapped:
-        if line:
-            draw.text((tx, ty), line, font=text_font, fill=_TEXT_COLOR)
-        ty += line_h + _LINE_GAP
+    # Nickname & text via Pilmoji (handles emoji rendering)
+    with Pilmoji(canvas) as pmoji:
+        pmoji.text((_MSG_X, _TOP_PAD), nickname, font=nick_font, fill=_NICK_COLOR)
+
+        tx = _MSG_X + _BUBBLE_PH
+        ty = bub_y + _BUBBLE_PV
+        for line in wrapped:
+            if line:
+                pmoji.text((tx, ty), line, font=text_font, fill=_TEXT_COLOR)
+            ty += line_h + _LINE_GAP
 
     buf = BytesIO()
     canvas.save(buf, format="PNG")

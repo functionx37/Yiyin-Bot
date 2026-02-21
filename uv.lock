@@ -1350,6 +1350,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pilmoji"
+version = "2.0.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "emoji" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/05/75/e5430da7a99ea66c9b93cdbd66372a010022398887eb3f8fcccb866010ee/pilmoji-2.0.5.tar.gz", hash = "sha256:e038532c97b79b3d55c29f5a6c2b6b627105b8cd1db0c1d2271402b3e4e9be18", size = 11889, upload-time = "2026-01-06T01:33:20.637Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/09/2dcc3fa1e0627f95143b61cc2c8a13042f5dcd7e11d1e12b0ba5e205aeca/pilmoji-2.0.5-py3-none-any.whl", hash = "sha256:856ddf827d42d8c8d2a1f879fdc1ae318ffb72435c4adc934be6d3e48376173d", size = 11740, upload-time = "2026-01-29T17:25:35.378Z" },
+]
+
+[[package]]
 name = "pip"
 version = "26.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2562,6 +2575,7 @@ dependencies = [
     { name = "nonebot-plugin-orm", extra = ["default"] },
     { name = "nonebot2", extra = ["fastapi", "httpx", "websockets"] },
     { name = "pillow" },
+    { name = "pilmoji" },
 ]
 
 [package.metadata]
@@ -2576,6 +2590,7 @@ requires-dist = [
     { name = "nonebot-plugin-orm", extras = ["default"], specifier = ">=0.8.3" },
     { name = "nonebot2", extras = ["fastapi", "httpx", "websockets"], specifier = ">=2.4.4" },
     { name = "pillow", specifier = ">=12.1.1" },
+    { name = "pilmoji", specifier = ">=2.0.4" },
 ]
 
 [[package]]

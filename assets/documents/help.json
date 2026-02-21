@@ -128,23 +128,23 @@
         "function": [
             {
                 "command": "/贴表情列表",
-                "description": "查看所有可用的贴表情"
+                "description": "查看使用方法和部分表情预览"
             },
             {
-                "command": "/贴 <ID/含义/emoji> <引用消息>",
-                "description": "给引用的消息贴上指定表情"
+                "command": "/贴 <ID> <引用消息>",
+                "description": "给引用的消息贴上指定ID的表情"
             },
             {
                 "command": "/贴<数字>个 <引用消息>",
-                "description": "给引用的消息随机贴上指定个数的表情（上限20）"
+                "description": "给引用的消息随机贴上指定个数的表情（上限20），完成后列出ID"
             },
             {
-                "command": "/发 <ID/含义>",
-                "description": "发送对应的QQ系统表情"
+                "command": "/发 <ID>",
+                "description": "发送对应ID的QQ系统表情"
             },
             {
                 "command": "/发 随机",
-                "description": "随机发送一个QQ系统表情"
+                "description": "随机发送一个QQ系统表情，并给出对应ID"
             }
         ]
     },

@@ -6,6 +6,7 @@ NoneBot2 角色扮演插件（37 — 重返未来：1999）
 """
 
 import json
+import os
 import random
 import time
 from collections import defaultdict, deque
@@ -23,21 +24,55 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PROMPT_PATH = Path(__file__).resolve().parent / "prompt.txt"
 CONFIG_PATH = PROJECT_ROOT / "config" / "roleplay.json"
 
-SYSTEM_PROMPT: str = PROMPT_PATH.read_text(encoding="utf-8").strip()
+_DEFAULTS = {
+    "model": "claude-haiku-4-5-20251001",
+    "reply_probability": 0.03,
+    "max_context_messages": 30,
+    "cooldown_seconds": 300,
+    "max_reply_tokens": 150,
+    "temperature": 0.85,
+}
 
-with open(CONFIG_PATH, "r", encoding="utf-8") as _f:
-    _config: dict = json.load(_f)
+_config_cache: dict | None = None
+_config_mtime: float = 0
+_prompt_cache: str = ""
+_prompt_mtime: float = 0
 
-MODEL: str = _config.get("model", "claude-haiku-4-5-20251001")
-REPLY_PROBABILITY: float = _config.get("reply_probability", 0.03)
-MAX_CONTEXT: int = _config.get("max_context_messages", 30)
-COOLDOWN: int = _config.get("cooldown_seconds", 300)
-MAX_REPLY_TOKENS: int = _config.get("max_reply_tokens", 150)
-TEMPERATURE: float = _config.get("temperature", 0.85)
+
+def _load_config() -> dict:
+    """读取配置文件，文件变更后自动重新加载"""
+    global _config_cache, _config_mtime
+    try:
+        mtime = os.path.getmtime(CONFIG_PATH)
+    except OSError:
+        return _config_cache or dict(_DEFAULTS)
+    if _config_cache is None or mtime != _config_mtime:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            _config_cache = json.load(f)
+        _config_mtime = mtime
+    return _config_cache
+
+
+def _load_prompt() -> str:
+    """读取 prompt 文件，文件变更后自动重新加载"""
+    global _prompt_cache, _prompt_mtime
+    try:
+        mtime = os.path.getmtime(PROMPT_PATH)
+    except OSError:
+        return _prompt_cache or ""
+    if not _prompt_cache or mtime != _prompt_mtime:
+        _prompt_cache = PROMPT_PATH.read_text(encoding="utf-8").strip()
+        _prompt_mtime = mtime
+    return _prompt_cache
+
+
+def _cfg(key: str):
+    """获取配置项，带默认值兜底"""
+    return _load_config().get(key, _DEFAULTS.get(key))
 
 # ==================== 运行时状态 ====================
 # 每个群的消息历史记录：deque of {"role": str, "name": str, "content": str}
-_group_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=MAX_CONTEXT))
+_group_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=200))
 # 每个群上次随机回复的时间戳
 _last_reply_time: dict[int, float] = defaultdict(float)
 # 机器人自身 QQ 号，启动后填充
@@ -73,17 +108,19 @@ async def _should_reply(event: GroupMessageEvent) -> bool:
         return True
 
     now = time.time()
-    if now - _last_reply_time[group_id] < COOLDOWN:
+    if now - _last_reply_time[group_id] < _cfg("cooldown_seconds"):
         return False
 
-    return random.random() < REPLY_PROBABILITY
+    return random.random() < _cfg("reply_probability")
 
 
 def _build_messages(group_id: int, current_text: str, sender_name: str) -> list[dict]:
     """构建发送给 LLM 的消息列表"""
-    messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages: list[dict[str, str]] = [{"role": "system", "content": _load_prompt()}]
 
-    for msg in _group_history[group_id]:
+    max_ctx = _cfg("max_context_messages")
+    history = list(_group_history[group_id])[-max_ctx:]
+    for msg in history:
         messages.append({"role": msg["role"], "content": msg["content"]})
 
     content = f"{sender_name}：{current_text}" if current_text else f"{sender_name} 发送了一条消息"
@@ -123,9 +160,9 @@ async def handle_group_msg(bot: Bot, event: GroupMessageEvent):
 
     if not at_me:
         now = time.time()
-        if now - _last_reply_time[group_id] < COOLDOWN:
+        if now - _last_reply_time[group_id] < _cfg("cooldown_seconds"):
             return
-        if random.random() >= REPLY_PROBABILITY:
+        if random.random() >= _cfg("reply_probability"):
             return
 
     # 构建并调用 LLM
@@ -133,9 +170,9 @@ async def handle_group_msg(bot: Bot, event: GroupMessageEvent):
 
     reply = await chat_completion(
         messages,
-        model=MODEL,
-        temperature=TEMPERATURE,
-        max_tokens=MAX_REPLY_TOKENS,
+        model=_cfg("model"),
+        temperature=_cfg("temperature"),
+        max_tokens=_cfg("max_reply_tokens"),
     )
 
     if not reply:

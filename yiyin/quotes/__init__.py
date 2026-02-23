@@ -19,6 +19,7 @@ from pathlib import Path
 
 import httpx
 from nonebot import on_command
+from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
@@ -349,7 +350,7 @@ async def handle_upload(
     image_dir.mkdir(parents=True, exist_ok=True)
 
     saved_ids: list[str] = []
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         for img_seg in images:
             url = img_seg.data.get("url")
             if not url:
@@ -363,6 +364,7 @@ async def handle_upload(
                 short_id = _add_to_index(group_id, canonical, filename)
                 saved_ids.append(short_id)
             except Exception:
+                logger.exception(f"下载语录图片失败: {url}")
                 continue
 
     if not saved_ids:
@@ -452,7 +454,7 @@ async def handle_screenshot_upload(
     except Exception:
         sender_nick = getattr(event.reply.sender, "nickname", None) or "群友"
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         try:
             resp = await client.get(
                 f"http://q1.qlogo.cn/g?b=qq&nk={sender_id}&s=100", timeout=10
@@ -460,6 +462,7 @@ async def handle_screenshot_upload(
             resp.raise_for_status()
             avatar_bytes = resp.content
         except Exception:
+            logger.exception(f"下载头像失败: {sender_id}")
             avatar_bytes = b""
 
     screenshot_bytes = await async_generate_chat_screenshot(

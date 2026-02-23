@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 from PIL import Image, ImageSequence, UnidentifiedImageError
 from nonebot import on_command
+from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 
@@ -241,6 +242,7 @@ async def handle_symmetric(
     try:
         await _download_image(image_url, temp_path)
     except Exception:
+        logger.exception(f"下载对称图片失败: {image_url}")
         temp_path.unlink(missing_ok=True)
         await symmetric_cmd.finish("图片下载失败，请稍后重试")
 

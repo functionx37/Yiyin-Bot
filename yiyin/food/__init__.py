@@ -15,6 +15,7 @@ from pathlib import Path
 
 import httpx
 from nonebot import on_command, on_keyword
+from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
@@ -145,7 +146,7 @@ async def handle_collect_food(
     images_dir.mkdir(parents=True, exist_ok=True)
 
     saved_ids: list[str] = []
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         for img_seg in images:
             url = img_seg.data.get("url")
             if not url:
@@ -159,6 +160,7 @@ async def handle_collect_food(
                 short_id = _add_to_index(group_id, filename, name)
                 saved_ids.append(short_id)
             except Exception:
+                logger.exception(f"下载食物图片失败: {url}")
                 continue
 
     if not saved_ids:

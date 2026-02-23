@@ -607,25 +607,37 @@ async def handle_random_essence(bot: Bot, event: GroupMessageEvent):
     if not essence_list:
         await random_essence_cmd.finish("本群暂无精华消息。")
 
-    chosen = random.choice(essence_list)
-    msg_id = chosen.get("message_id")
-    sender_nick = chosen.get("sender_nick") or "未知"
+    # 打乱顺序后逐条尝试，避免抽到已过期/已删除的消息时直接失败
+    shuffled = list(essence_list)
+    random.shuffle(shuffled)
+    last_error = None
 
-    if msg_id is None:
-        await random_essence_cmd.finish("该条精华消息数据异常，无法获取内容。")
+    for chosen in shuffled:
+        msg_id = chosen.get("message_id")
+        sender_nick = chosen.get("sender_nick") or "未知"
+        if msg_id is None:
+            continue
+        try:
+            msg_data = await bot.get_msg(message_id=msg_id)
+        except Exception as e:
+            last_error = e
+            # retcode 1200 = 消息不存在（已过期或已删除），换下一条重试
+            if getattr(e, "retcode", None) == 1200 or "消息不存在" in str(e):
+                logger.debug(f"精华消息已不可用 message_id={msg_id}，尝试下一条")
+                continue
+            logger.warning(f"获取精华消息内容失败 message_id={msg_id}: {e}")
+            await random_essence_cmd.finish("获取精华消息内容失败，请稍后重试。")
 
-    try:
-        msg_data = await bot.get_msg(message_id=msg_id)
-    except Exception as e:
-        logger.warning(f"获取精华消息内容失败 message_id={msg_id}: {e}")
-        await random_essence_cmd.finish("获取精华消息内容失败，请稍后重试。")
+        raw = msg_data.get("message", "")
+        content = _msg_to_plain_text(raw)
+        if not content:
+            content = "[该条消息无文字内容]"
+        await random_essence_cmd.finish(f"{sender_nick}：{content}")
 
-    raw = msg_data.get("message", "")
-    content = _msg_to_plain_text(raw)
-    if not content:
-        content = "[该条消息无文字内容]"
-
-    await random_essence_cmd.finish(f"{sender_nick}：{content}")
+    logger.warning(f"所有精华消息均不可用（如已过期或已删除）: {last_error}")
+    await random_essence_cmd.finish(
+        "随机到的精华消息已过期或已被删除，无法获取内容，请稍后再试。"
+    )
 
 
 @delete_quote_cmd.handle()

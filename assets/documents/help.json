@@ -57,6 +57,10 @@
                 "description": "从本群全部语录中随机抽取一条"
             },
             {
+                "command": "/随机精华",
+                "description": "从群精华消息中随机抽取一条"
+            },
+            {
                 "command": "/删除语录 <ID>",
                 "description": "删除指定ID的语录（仅超级管理员）"
             }

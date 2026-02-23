@@ -7,6 +7,7 @@ NoneBot2 群友语录插件
 - 命令：/截图上传 <群友昵称> [引用消息]
 - 命令：/查看 <群友昵称>
 - 命令：/随机群友
+- 命令：/随机精华（从群精华消息中随机抽一条，格式：昵称：内容）
 - 命令：/删除语录 <ID>（仅超级管理员）
 - 功能：记录并随机查看群友的发言截图
 """
@@ -223,6 +224,7 @@ upload_cmd = on_command("上传", priority=10, block=True)
 screenshot_upload_cmd = on_command("截图上传", priority=10, block=True)
 view_cmd = on_command("查看", priority=10, block=True)
 random_member_cmd = on_command("随机群友", priority=10, block=True)
+random_essence_cmd = on_command("随机精华", priority=10, block=True)
 delete_quote_cmd = on_command(
     "删除语录", priority=10, block=True, permission=SUPERUSER
 )
@@ -564,6 +566,66 @@ async def handle_random_member(bot: Bot, event: GroupMessageEvent):
         f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
     ) + MessageSegment.image(image_bytes)
     await random_member_cmd.finish(msg)
+
+
+def _msg_to_plain_text(raw) -> str:
+    """将 get_msg 返回的 message 转为纯文本"""
+    if isinstance(raw, str):
+        return Message(raw).extract_plain_text().strip()
+    if isinstance(raw, Message):
+        return raw.extract_plain_text().strip()
+    if isinstance(raw, list):
+        parts = []
+        for seg in raw:
+            if isinstance(seg, dict):
+                if seg.get("type") == "text":
+                    parts.append(seg.get("data", {}).get("text", ""))
+                elif seg.get("type") in ("image", "face", "record", "video"):
+                    parts.append(f"[{seg.get('type', 'message')}]")
+            elif isinstance(seg, MessageSegment) and seg.type == "text":
+                parts.append(seg.data.get("text", ""))
+        return "".join(parts).strip()
+    return ""
+
+
+@random_essence_cmd.handle()
+async def handle_random_essence(bot: Bot, event: GroupMessageEvent):
+    """处理 /随机精华 命令：从群精华消息中随机抽一条，发送格式为 昵称：内容"""
+    group_id = event.group_id
+    try:
+        result = await bot.call_api("get_essence_msg_list", group_id=group_id)
+    except Exception as e:
+        logger.warning(f"获取群精华消息列表失败: {e}")
+        await random_essence_cmd.finish(
+            "获取精华列表失败，请确认当前协议支持 get_essence_msg_list（如 go-cqhttp）且机器人有权限。"
+        )
+
+    if not result:
+        await random_essence_cmd.finish("本群暂无精华消息。")
+
+    essence_list = result if isinstance(result, list) else []
+    if not essence_list:
+        await random_essence_cmd.finish("本群暂无精华消息。")
+
+    chosen = random.choice(essence_list)
+    msg_id = chosen.get("message_id")
+    sender_nick = chosen.get("sender_nick") or "未知"
+
+    if msg_id is None:
+        await random_essence_cmd.finish("该条精华消息数据异常，无法获取内容。")
+
+    try:
+        msg_data = await bot.get_msg(message_id=msg_id)
+    except Exception as e:
+        logger.warning(f"获取精华消息内容失败 message_id={msg_id}: {e}")
+        await random_essence_cmd.finish("获取精华消息内容失败，请稍后重试。")
+
+    raw = msg_data.get("message", "")
+    content = _msg_to_plain_text(raw)
+    if not content:
+        content = "[该条消息无文字内容]"
+
+    await random_essence_cmd.finish(f"{sender_nick}：{content}")
 
 
 @delete_quote_cmd.handle()

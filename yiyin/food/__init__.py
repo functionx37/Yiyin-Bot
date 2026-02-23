@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 import httpx
-from nonebot import on_command, on_message
+from nonebot import on_command, on_keyword
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
@@ -121,8 +121,7 @@ delete_food_cmd = on_command(
 supplement_name_cmd = on_command("补充名字", priority=10, block=True)
 feast_cmd = on_command("吃大餐", priority=10, block=True)
 
-# 检测「吃什么」用 on_message，需在 handler 里判断功能开关
-what_to_eat_matcher = on_message(priority=50, block=False)
+what_to_eat_matcher = on_keyword({"吃什么"}, priority=50, block=False)
 
 
 # ==================== 命令处理 ====================
@@ -266,10 +265,6 @@ async def handle_feast(
 async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
     """检测「吃什么」：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]"""
     group_id = str(event.group_id)
-    text = (event.get_message().extract_plain_text() or "").strip()
-    if "吃什么" not in text:
-        return
-
     index = _load_index(group_id)
     if not index:
         return
@@ -283,6 +278,6 @@ async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
     if not filepath.exists():
         return
 
-    await bot.send(event, "是啊，吃什么。")
+    await bot.send(event, "是啊，吃什么")
     msg = MessageSegment.text("请你吃") + MessageSegment.text(label) + MessageSegment.text("怎么样？\n") + MessageSegment.image(filepath.read_bytes())
     await what_to_eat_matcher.finish(msg)

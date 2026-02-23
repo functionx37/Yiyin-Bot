@@ -63,6 +63,31 @@
         ]
     },
     {
+        "module": "食物图鉴",
+        "function": [
+            {
+                "command": "/收集食物 (名字) [图片]",
+                "description": "保存食物图片"
+            },
+            {
+                "command": "/删除食物 <ID>",
+                "description": "删除指定ID的食物（仅超级管理员）"
+            },
+            {
+                "command": "/补充名字 <ID> <名字>",
+                "description": "为食物补充或修改名字"
+            },
+            {
+                "command": "/吃大餐 (数量)",
+                "description": "随机上菜"
+            },
+            {
+                "command": "吃什么",
+                "description": "随机推荐一道食物"
+            }
+        ]
+    },
+    {
         "module": "表情包制作",
         "function": [
             {

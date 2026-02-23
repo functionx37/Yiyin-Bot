@@ -9,7 +9,8 @@
     "nonebot_plugin_memes": "表情包制作",
     "nonebot_plugin_emojimix": "Emoji合成",
     "nonebot_plugin_anime_trace": "动漫识别",
-    "emoji_reaction": "贴表情"
+    "emoji_reaction": "贴表情",
+    "food": "食物图鉴"
   },
   "optin": {
     "roleplay": "角色扮演",

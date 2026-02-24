@@ -1,8 +1,7 @@
 """
-NoneBot2 对称图片插件
+对称图片子功能
 - 命令：/对称 [左/右/上/下] [图片]
-- 功能：将图片按指定方向对称翻转，支持动图和透明通道
-- 支持回复图片消息进行对称处理
+- 将图片按指定方向对称翻转，支持动图和透明通道
 """
 
 import asyncio
@@ -20,26 +19,22 @@ from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, MessageSegme
 from nonebot.params import CommandArg
 
 # ==================== 资源限制 ====================
-MAX_IMAGE_PIXELS = 4_000_000  # 单帧最大像素数（约 2000×2000）
-MAX_GIF_FRAMES = 80           # 动图最大帧数
-MAX_CONCURRENT = 1            # 最大并发图片处理数
-QUEUE_TIMEOUT = 10            # 等待队列超时（秒）
-PROCESS_TIMEOUT = 30          # 单次处理超时（秒）
+MAX_IMAGE_PIXELS = 4_000_000
+MAX_GIF_FRAMES = 100
+MAX_CONCURRENT = 1
+QUEUE_TIMEOUT = 10
+PROCESS_TIMEOUT = 30
 
 _semaphore = asyncio.Semaphore(MAX_CONCURRENT)
-_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="symmetric")
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="meme")
 
-# ==================== 注册命令 ====================
 symmetric_cmd = on_command("对称", priority=10, block=True)
 
-# ==================== 对称方向常量 ====================
 VALID_DIRECTIONS = {"左", "右", "上", "下"}
 DEFAULT_DIRECTION = "左"
 
 
-# ==================== 图片处理核心 ====================
 def _downscale_if_needed(img: Image.Image) -> Image.Image:
-    """如果图片像素数超限，按比例缩小以降低 CPU 负载"""
     w, h = img.size
     if w * h > MAX_IMAGE_PIXELS:
         scale = (MAX_IMAGE_PIXELS / (w * h)) ** 0.5
@@ -49,13 +44,6 @@ def _downscale_if_needed(img: Image.Image) -> Image.Image:
 
 
 def _apply_symmetric(img: Image.Image, direction: str) -> Image.Image:
-    """对单帧 RGBA 图片应用对称操作
-
-    - 左：保留左半部分，水平镜像到右半
-    - 右：保留右半部分，水平镜像到左半
-    - 上：保留上半部分，垂直镜像到下半
-    - 下：保留下半部分，垂直镜像到上半
-    """
     w, h = img.size
 
     if direction == "左":
@@ -97,13 +85,10 @@ def _apply_symmetric(img: Image.Image, direction: str) -> Image.Image:
 
 
 def _process_static(img: Image.Image, direction: str) -> bytes:
-    """处理静态图片，输出 PNG 格式以保留透明通道"""
     if img.mode != "RGBA":
         img = img.convert("RGBA")
-
     img = _downscale_if_needed(img)
     result = _apply_symmetric(img, direction)
-
     buf = BytesIO()
     result.save(buf, format="PNG")
     buf.seek(0)
@@ -111,48 +96,34 @@ def _process_static(img: Image.Image, direction: str) -> bytes:
 
 
 def _process_animated(img: Image.Image, direction: str) -> bytes:
-    """处理动图（GIF / APNG / 动态 WebP），输出 GIF 格式
-
-    流程：检查帧数 → 逐帧提取 → 缩放 → RGBA 对称处理 → 转 P 模式 → 合成 GIF
-    """
     n_frames = getattr(img, "n_frames", 1)
     if n_frames > MAX_GIF_FRAMES:
         raise ValueError(
-            f"动图帧数过多（{n_frames} 帧，上限 {MAX_GIF_FRAMES} 帧），"
-            "请使用更短的动图"
+            f"动图帧数过多（{n_frames} 帧，上限 {MAX_GIF_FRAMES} 帧），请使用更短的动图"
         )
-
     frames: list[Image.Image] = []
     durations: list[int] = []
-
     for frame in ImageSequence.Iterator(img):
         duration = frame.info.get("duration", 100)
         if duration <= 0:
             duration = 100
         durations.append(duration)
-
         rgba_frame = frame.convert("RGBA")
         rgba_frame = _downscale_if_needed(rgba_frame)
         processed = _apply_symmetric(rgba_frame, direction)
         frames.append(processed)
-
     if not frames:
         raise ValueError("动图中没有有效帧")
-
-    # RGBA 帧转 P 模式，保留透明通道用于 GIF 输出
     gif_frames: list[Image.Image] = []
     for f in frames:
         alpha = f.split()[3]
-        # 保留 255 个颜色，第 256 色(索引255)留给透明
         p_frame = f.convert("RGB").convert(
             "P", palette=Image.Palette.ADAPTIVE, colors=255
         )
-        # alpha <= 128 的像素标记为透明
         mask = Image.eval(alpha, lambda a: 255 if a <= 128 else 0)
         p_frame.paste(255, mask)
         p_frame.info["transparency"] = 255
         gif_frames.append(p_frame)
-
     buf = BytesIO()
     gif_frames[0].save(
         buf,
@@ -168,23 +139,18 @@ def _process_animated(img: Image.Image, direction: str) -> bytes:
 
 
 def _do_process(image_bytes: bytes, direction: str) -> bytes:
-    """在工作线程中执行的同步图片处理入口"""
     try:
         img = Image.open(BytesIO(image_bytes))
     except UnidentifiedImageError:
         raise ValueError("无法识别的图片格式，请发送 PNG、JPG 或 GIF 图片")
-
     with img:
         is_animated = getattr(img, "is_animated", False)
         if is_animated:
             return _process_animated(img, direction)
-        else:
-            return _process_static(img, direction)
+        return _process_static(img, direction)
 
 
-# ==================== 辅助函数 ====================
 def _extract_image_url(msg: Message) -> str | None:
-    """从消息段列表中提取第一张图片的 URL"""
     for seg in msg:
         if seg.type == "image":
             url = seg.data.get("url")
@@ -194,7 +160,6 @@ def _extract_image_url(msg: Message) -> str | None:
 
 
 async def _download_image(url: str, save_path: Path) -> None:
-    """下载图片到本地临时路径"""
     async with httpx.AsyncClient(follow_redirects=True) as client:
         resp = await client.get(url, timeout=30)
         resp.raise_for_status()
@@ -202,39 +167,27 @@ async def _download_image(url: str, save_path: Path) -> None:
         save_path.write_bytes(resp.content)
 
 
-# ==================== 命令处理 ====================
 @symmetric_cmd.handle()
 async def handle_symmetric(
     bot: Bot, event: MessageEvent, args: Message = CommandArg()
 ):
-    """处理 /对称 命令"""
-
-    # 1. 解析方向参数（默认"左"）
     text = args.extract_plain_text().strip()
     direction = DEFAULT_DIRECTION
+    if text and text[0] in VALID_DIRECTIONS:
+        direction = text[0]
 
-    if text:
-        first_char = text[0]
-        if first_char in VALID_DIRECTIONS:
-            direction = first_char
-
-    # 2. 获取图片 URL（优先命令消息中的图片，其次回复消息中的图片）
     image_url = _extract_image_url(args)
-
     if not image_url and event.reply:
         image_url = _extract_image_url(event.reply.message)
 
     if not image_url:
         await symmetric_cmd.finish(
             "请附带图片或回复一张图片，例如：\n"
-            "/对称 左 [图片]\n"
-            "/对称 [图片]\n"
-            "回复图片消息并发送 /对称 右"
+            "/对称 左 [图片]\n/对称 [图片]\n回复图片消息并发送 /对称 右"
         )
 
-    # 3. 使用临时目录（用毕自动销毁，不遗留 data/symmetric/temp）
     temp_id = uuid.uuid4().hex
-    with tempfile.TemporaryDirectory(prefix="symmetric_") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="meme_") as tmpdir:
         temp_path = Path(tmpdir) / temp_id
         try:
             await _download_image(image_url, temp_path)
@@ -242,13 +195,11 @@ async def handle_symmetric(
             logger.exception(f"下载对称图片失败: {image_url}")
             await symmetric_cmd.finish("图片下载失败，请稍后重试")
 
-        # 4. 获取并发信号量（避免多个图片处理任务同时运行压垮 CPU）
         try:
             await asyncio.wait_for(_semaphore.acquire(), timeout=QUEUE_TIMEOUT)
         except asyncio.TimeoutError:
             await symmetric_cmd.finish("当前有其他图片正在处理中，请稍后再试")
 
-        # 5. 在线程池中处理图片（不阻塞事件循环）
         try:
             image_bytes = temp_path.read_bytes()
             loop = asyncio.get_running_loop()
@@ -265,5 +216,4 @@ async def handle_symmetric(
         finally:
             _semaphore.release()
 
-    # 6. 发送对称图片（with 块结束后临时目录已自动删除）
     await symmetric_cmd.finish(MessageSegment.image(result_bytes))

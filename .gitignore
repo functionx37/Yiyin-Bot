@@ -35,6 +35,9 @@ Thumbs.db
 # Bot runtime data
 data/
 
+# 一机一份的 ORM 等（由 LOCALSTORE_PLUGIN_DATA_DIR 指定到 .local/orm）
+.local/
+
 # Docker runtime data
 napcat/data/
 napcat/config/

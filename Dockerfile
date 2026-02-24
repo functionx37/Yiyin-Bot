@@ -22,11 +22,12 @@ RUN uv sync --frozen --no-dev
 # 复制项目文件
 COPY . .
 
-# meme-generator 资源存储路径（持久化到挂载卷）
-ENV MEME_HOME=/app/data/meme_generator
+# 与 .env.example 对应：容器内固定路径，不依赖 env_file 是否写全
+ENV MEME_HOME=/app/assets/images/meme_generator
+ENV LOCALSTORE_PLUGIN_DATA_DIR='{"nonebot_plugin_orm": ".local/orm"}'
 ENV PYTHONWARNINGS="ignore::SyntaxWarning"
 
 # NoneBot 默认端口
 EXPOSE 8080
 
-CMD ["sh", "-c", "mkdir -p $MEME_HOME && cp config/meme_generator.toml $MEME_HOME/config.toml && uv run nb orm upgrade && uv run python bot.py"]
+CMD ["sh", "-c", "uv run nb orm upgrade && uv run python bot.py"]

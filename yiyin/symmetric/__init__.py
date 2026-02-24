@@ -6,6 +6,7 @@ NoneBot2 对称图片插件
 """
 
 import asyncio
+import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -17,10 +18,6 @@ from nonebot import on_command
 from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
-
-# ==================== 路径配置 ====================
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-TEMP_DIR = PROJECT_ROOT / "data" / "symmetric" / "temp"
 
 # ==================== 资源限制 ====================
 MAX_IMAGE_PIXELS = 4_000_000  # 单帧最大像素数（约 2000×2000）
@@ -235,41 +232,38 @@ async def handle_symmetric(
             "回复图片消息并发送 /对称 右"
         )
 
-    # 3. 下载图片到临时目录
+    # 3. 使用临时目录（用毕自动销毁，不遗留 data/symmetric/temp）
     temp_id = uuid.uuid4().hex
-    temp_path = TEMP_DIR / temp_id
+    with tempfile.TemporaryDirectory(prefix="symmetric_") as tmpdir:
+        temp_path = Path(tmpdir) / temp_id
+        try:
+            await _download_image(image_url, temp_path)
+        except Exception:
+            logger.exception(f"下载对称图片失败: {image_url}")
+            await symmetric_cmd.finish("图片下载失败，请稍后重试")
 
-    try:
-        await _download_image(image_url, temp_path)
-    except Exception:
-        logger.exception(f"下载对称图片失败: {image_url}")
-        temp_path.unlink(missing_ok=True)
-        await symmetric_cmd.finish("图片下载失败，请稍后重试")
+        # 4. 获取并发信号量（避免多个图片处理任务同时运行压垮 CPU）
+        try:
+            await asyncio.wait_for(_semaphore.acquire(), timeout=QUEUE_TIMEOUT)
+        except asyncio.TimeoutError:
+            await symmetric_cmd.finish("当前有其他图片正在处理中，请稍后再试")
 
-    # 4. 获取并发信号量（避免多个图片处理任务同时运行压垮 CPU）
-    try:
-        await asyncio.wait_for(_semaphore.acquire(), timeout=QUEUE_TIMEOUT)
-    except asyncio.TimeoutError:
-        temp_path.unlink(missing_ok=True)
-        await symmetric_cmd.finish("当前有其他图片正在处理中，请稍后再试")
+        # 5. 在线程池中处理图片（不阻塞事件循环）
+        try:
+            image_bytes = temp_path.read_bytes()
+            loop = asyncio.get_running_loop()
+            result_bytes = await asyncio.wait_for(
+                loop.run_in_executor(_executor, _do_process, image_bytes, direction),
+                timeout=PROCESS_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            await symmetric_cmd.finish("图片处理超时，请使用较小的图片或更短的动图")
+        except ValueError as e:
+            await symmetric_cmd.finish(str(e))
+        except Exception as e:
+            await symmetric_cmd.finish(f"图片处理失败：{e}")
+        finally:
+            _semaphore.release()
 
-    # 5. 在线程池中处理图片（不阻塞事件循环）
-    try:
-        image_bytes = temp_path.read_bytes()
-        loop = asyncio.get_running_loop()
-        result_bytes = await asyncio.wait_for(
-            loop.run_in_executor(_executor, _do_process, image_bytes, direction),
-            timeout=PROCESS_TIMEOUT,
-        )
-    except asyncio.TimeoutError:
-        await symmetric_cmd.finish("图片处理超时，请使用较小的图片或更短的动图")
-    except ValueError as e:
-        await symmetric_cmd.finish(str(e))
-    except Exception as e:
-        await symmetric_cmd.finish(f"图片处理失败：{e}")
-    finally:
-        _semaphore.release()
-        temp_path.unlink(missing_ok=True)
-
-    # 6. 发送对称图片
+    # 6. 发送对称图片（with 块结束后临时目录已自动删除）
     await symmetric_cmd.finish(MessageSegment.image(result_bytes))

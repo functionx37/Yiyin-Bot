@@ -11,41 +11,26 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from nonebot import on_command
-from nonebot.adapters.onebot.v11 import MessageEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.params import CommandArg
 
 # ==================== 资源路径 ====================
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 BIBI_IMAGE_PATH = _PROJECT_ROOT / "assets" / "images" / "ziming" / "bibi.jpg"
 
-# ==================== 字体 ====================
-_FONT_PATHS = [
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-    "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
-]
-_font_path_cache: str | None = None
+# ==================== 字体（微软雅黑，项目内 assets/fonts/） ====================
+# 使用加粗体 msyhbd.ttc，无自带加粗则用 msyh.ttc
+FONT_PATH = _PROJECT_ROOT / "assets" / "fonts" / "msyhbd.ttc"
+FONT_PATH_FALLBACK = _PROJECT_ROOT / "assets" / "fonts" / "msyh.ttc"
 
 
-def _get_font_path() -> str | None:
-    global _font_path_cache
-    if _font_path_cache is not None:
-        return _font_path_cache
-    for p in _FONT_PATHS:
-        if Path(p).exists():
-            _font_path_cache = p
-            return p
-    _font_path_cache = None
-    return None
-
-
-def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    path = _get_font_path()
-    if path:
-        return ImageFont.truetype(path, size)
-    return ImageFont.load_default(size)
+def _get_font(size: int) -> ImageFont.FreeTypeFont:
+    path = FONT_PATH if FONT_PATH.exists() else FONT_PATH_FALLBACK
+    if not path.exists():
+        raise FileNotFoundError(
+            f"未找到微软雅黑字体，请将 msyh.ttc / msyhbd.ttc 放到 assets/fonts/ 目录"
+        )
+    return ImageFont.truetype(str(path), size)
 
 
 # ==================== 解析 （文本1）（文本2）（文本3） ====================
@@ -58,11 +43,24 @@ def _parse_strong_args(text: str) -> list[str]:
     return parts[:3]
 
 
-# ==================== 强强图片生成 ====================
-# 三个箭头上方大致比例位置（基于 bibi.jpg 构图：三人像等距，箭头在上方）
-_TEXT_X_RATIOS = (1 / 6, 1 / 2, 5 / 6)  # 左、中、右
-_TEXT_Y_RATIO = 0.10   # 文字基线约在画面顶部 10% 处（箭头上方）
-_FONT_SIZE_RATIO = 1 / 22  # 字号 ≈ 图宽 / 22
+# ==================== 强强图片生成（位置与字号，可手调） ====================
+# 以下均为相对图片宽高的比例，取值 0.0～1.0。
+#
+# _TEXT_X_RATIOS：三段文字的水平中心位置（0=最左，1=最右）
+#   - 第 1 个：往左调就减小，往右调就增大
+#   - 第 2 个：同上
+#   - 第 3 个：同上
+# _TEXT_Y_RATIO：三段文字「底部」所在的垂直位置（0=顶部，1=底部）
+#   - 数值越大文字越靠下，对准箭头就适当增大
+# _FONT_SIZE_RATIO：字号 = 图宽 × 该比例（再被 MIN/MAX 限制）
+#   - 数值越大字越大，例如 1/16 比 1/22 大
+# _FONT_SIZE_MIN / _FONT_SIZE_MAX：字号的像素上下限
+#
+_TEXT_X_RATIOS = (0.13, 0.50, 0.86)   # 左、中、右（1 再往左一点，2 再往右一点）
+_TEXT_Y_RATIO = 0.15                   # 整体往下一点对准箭头
+_FONT_SIZE_RATIO = 1 / 17              # 字号稍小一点
+_FONT_SIZE_MIN = 18
+_FONT_SIZE_MAX = 96
 
 
 def _draw_bibi(texts: list[str]) -> bytes:
@@ -73,33 +71,26 @@ def _draw_bibi(texts: list[str]) -> bytes:
     img = Image.open(BIBI_IMAGE_PATH).convert("RGB")
     w, h = img.size
 
-    font_size = max(14, min(72, int(w * _FONT_SIZE_RATIO)))
+    font_size = max(_FONT_SIZE_MIN, min(_FONT_SIZE_MAX, int(w * _FONT_SIZE_RATIO)))
     font = _get_font(font_size)
     draw = ImageDraw.Draw(img)
 
-    # 黑色描边可读性更好，白底用黑色字
     fill = (0, 0, 0)
-    outline = (255, 255, 255)
-    stroke_width = max(1, font_size // 20)
+    stroke_width = max(1, font_size // 24)  # 细白边提高可读性
 
     for i, s in enumerate(texts):
         if not s:
             continue
         cx = int(w * _TEXT_X_RATIOS[i])
         cy = int(h * _TEXT_Y_RATIO)
-        # 使用 getbbox 得到文字框，锚点取水平居中、基线在 cy
         bbox = draw.textbbox((0, 0), s, font=font)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
         x = cx - tw // 2
-        y = cy - th  # 使文字在 cy 上方
+        y = cy - th
         draw.text(
-            (x, y),
-            s,
-            font=font,
-            fill=fill,
-            stroke_width=stroke_width,
-            stroke_fill=outline,
+            (x, y), s, font=font, fill=fill,
+            stroke_width=stroke_width, stroke_fill=(255, 255, 255),
         )
 
     buf = BytesIO()
@@ -113,7 +104,7 @@ qiangqiang_cmd = on_command("强强", priority=10, block=True)
 
 
 @qiangqiang_cmd.handle()
-async def handle_qiangqiang(event: MessageEvent, args: CommandArg()):
+async def handle_qiangqiang(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     raw = args.extract_plain_text().strip()
     if not raw:
         await qiangqiang_cmd.finish(
@@ -127,4 +118,6 @@ async def handle_qiangqiang(event: MessageEvent, args: CommandArg()):
         await qiangqiang_cmd.finish(str(e))
     except Exception as e:
         await qiangqiang_cmd.finish(f"生成失败：{e}")
-    await qiangqiang_cmd.finish(MessageSegment.image(out_bytes))
+    # 显式用 bot.send 发送图片，再 finish 结束，避免仅 finish(image) 时部分环境下不发出
+    await bot.send(event, MessageSegment.image(out_bytes))
+    await qiangqiang_cmd.finish()

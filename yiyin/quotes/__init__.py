@@ -6,7 +6,8 @@ NoneBot2 群友语录插件
 - 命令：/上传 <群友昵称> [图片]
 - 命令：/截图上传 <群友昵称> [引用消息]
 - 命令：/查看 <群友昵称>
-- 命令：/随机群友
+- 命令：/随机群友 [昵称]（等概率随机一个有语录的群友再随机一条；指定昵称则从该群友语录中随机）
+- 命令：/随机语录（从本群全部语录中随机抽取一条）
 - 命令：/随机精华（从群精华消息中随机抽一条，格式：昵称：内容）
 - 命令：/删除语录 <ID>（仅超级管理员）
 - 功能：记录并随机查看群友的发言截图
@@ -176,6 +177,17 @@ def _find_id_by_filepath(group_id: str, member: str, filename: str) -> str | Non
     return None
 
 
+def _get_members_with_quotes(group_id: str) -> list[str]:
+    """返回有语录的群友主昵称列表（用于等概率随机群友）"""
+    members = _load_members(group_id)
+    result = []
+    for name in members:
+        image_dir = _get_member_image_dir(group_id, name)
+        if image_dir.exists() and list(image_dir.glob("*.*")):
+            result.append(name)
+    return result
+
+
 async def _extract_images(
     bot: Bot, event: GroupMessageEvent, args: Message
 ) -> list[MessageSegment]:
@@ -224,6 +236,7 @@ upload_cmd = on_command("上传", priority=10, block=True)
 screenshot_upload_cmd = on_command("截图上传", priority=10, block=True)
 view_cmd = on_command("查看", priority=10, block=True)
 random_member_cmd = on_command("随机群友", priority=10, block=True)
+random_quote_cmd = on_command("随机语录", priority=10, block=True)
 random_essence_cmd = on_command("随机精华", priority=10, block=True)
 delete_quote_cmd = on_command(
     "删除语录", priority=10, block=True, permission=SUPERUSER
@@ -535,13 +548,61 @@ async def handle_view(
 
 
 @random_member_cmd.handle()
-async def handle_random_member(bot: Bot, event: GroupMessageEvent):
-    """处理 /随机群友 命令：从全部群友语录中随机抽取一条"""
+async def handle_random_member(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    """处理 /随机群友 [昵称]：等概率随机一个有语录的群友再随机一条；指定昵称则从该群友语录中随机"""
+    group_id = str(event.group_id)
+    name_arg = args.extract_plain_text().strip()
+
+    if name_arg:
+        # 指定了昵称：从该群友的语录中随机一条
+        canonical = _resolve_name(group_id, name_arg)
+        if not canonical:
+            await random_member_cmd.finish(
+                f"群友「{name_arg}」不存在，请先使用 /新增群友 {name_arg} 添加"
+            )
+        image_dir = _get_member_image_dir(group_id, canonical)
+        if not image_dir.exists():
+            await random_member_cmd.finish(
+                f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
+            )
+        image_files = list(image_dir.glob("*.*"))
+        if not image_files:
+            await random_member_cmd.finish(
+                f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
+            )
+        chosen_name = canonical
+        chosen_file = random.choice(image_files)
+    else:
+        # 未指定昵称：先等概率随机一个有语录的群友，再从其语录中随机一条
+        members_with = _get_members_with_quotes(group_id)
+        if not members_with:
+            await random_member_cmd.finish(
+                "本群还没有任何语录记录，使用 /上传 <昵称> [图片] 来添加吧"
+            )
+        chosen_name = random.choice(members_with)
+        image_dir = _get_member_image_dir(group_id, chosen_name)
+        image_files = list(image_dir.glob("*.*"))
+        chosen_file = random.choice(image_files)
+
+    image_bytes = chosen_file.read_bytes()
+    short_id = _find_id_by_filepath(group_id, chosen_name, chosen_file.name)
+    id_hint = f"（ID：{short_id}）" if short_id else ""
+    msg = MessageSegment.text(
+        f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
+    ) + MessageSegment.image(image_bytes)
+    await random_member_cmd.finish(msg)
+
+
+@random_quote_cmd.handle()
+async def handle_random_quote(bot: Bot, event: GroupMessageEvent):
+    """处理 /随机语录 命令：从本群全部语录中随机抽取一条"""
     group_id = str(event.group_id)
     members = _load_members(group_id)
 
     if not members:
-        await random_member_cmd.finish(
+        await random_quote_cmd.finish(
             "本群还没有记录任何群友，使用 /新增群友 <昵称> 来添加吧"
         )
 
@@ -553,7 +614,7 @@ async def handle_random_member(bot: Bot, event: GroupMessageEvent):
                 all_quotes.append((name, img_file))
 
     if not all_quotes:
-        await random_member_cmd.finish(
+        await random_quote_cmd.finish(
             "本群还没有任何语录记录，使用 /上传 <昵称> [图片] 来添加吧"
         )
 
@@ -565,7 +626,7 @@ async def handle_random_member(bot: Bot, event: GroupMessageEvent):
     msg = MessageSegment.text(
         f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
     ) + MessageSegment.image(image_bytes)
-    await random_member_cmd.finish(msg)
+    await random_quote_cmd.finish(msg)
 
 
 def _msg_to_plain_text(raw) -> str:

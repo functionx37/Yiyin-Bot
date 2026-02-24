@@ -53,7 +53,11 @@
                 "description": "随机查看一条群友的语录截图"
             },
             {
-                "command": "/随机群友",
+                "command": "/随机群友 (昵称)",
+                "description": "随机一个群友的一条语录"
+            },
+            {
+                "command": "/随机语录",
                 "description": "从本群全部语录中随机抽取一条"
             },
             {

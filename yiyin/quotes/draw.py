@@ -10,33 +10,15 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from pilmoji import Pilmoji
 
-_FONT_SEARCH_PATHS = [
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-    "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
-]
-
-_font_path_cache: str | None = ...  # type: ignore[assignment]
-
-
-def _resolve_font_path() -> str | None:
-    global _font_path_cache
-    if _font_path_cache is not ...:
-        return _font_path_cache
-    for p in _FONT_SEARCH_PATHS:
-        if Path(p).exists():
-            _font_path_cache = p
-            return p
-    _font_path_cache = None
-    return None
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_FONT_PATH = _PROJECT_ROOT / "assets" / "fonts" / "msyh.ttc"
+_FONT_PATH_FALLBACK = _PROJECT_ROOT / "assets" / "fonts" / "msyhbd.ttc"
 
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    path = _resolve_font_path()
-    if path:
-        return ImageFont.truetype(path, size)
+    path = _FONT_PATH if _FONT_PATH.exists() else _FONT_PATH_FALLBACK
+    if path.exists():
+        return ImageFont.truetype(str(path), size)
     return ImageFont.load_default(size)
 
 

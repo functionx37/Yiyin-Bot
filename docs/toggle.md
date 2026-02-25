@@ -17,7 +17,7 @@
 
 - **功能注册表**：`config/features.json`
   - `plugins`：默认启用，可按群禁用（如塔罗牌、群友语录、翻译等）。
-  - `optin`：默认关闭，需在群内 `/启用`（如角色扮演、伪造消息）。
+  - `optin`：默认关闭，需在群内 `/启用`（如伪造消息）。
   - `hidden`：默认关闭且不在功能列表中展示，需手动启用（如「世界通知」「摩诃」）。
 - **运行时状态**：`data/toggle/config.json`
   - `disabled[group_id]`：该群已禁用的插件 key 列表。
@@ -35,7 +35,7 @@
 
 - **`is_feature_enabled(feature_key: str, group_id: str) -> bool`**
   - 供其他插件判断某 opt-in/hidden 功能是否在某群已启用。
-  - 例：塔罗牌中「世界通知」、角色扮演、摩诃 均通过此函数判断。
+  - 例：塔罗牌中「世界通知」、摩诃 均通过此函数判断。
 
 ### 权限
 

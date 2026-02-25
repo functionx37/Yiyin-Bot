@@ -6,7 +6,7 @@
 
 ## 1. 项目概述
 
-**Yiyin-Bot** 是一个基于 **NoneBot2** 与 **NapCat** 的 QQ 群聊机器人。功能包括：塔罗牌占卜、群友语录、食物图鉴、表情包制作、翻译、数学求解、随机选择、贴表情、动漫识别、伪造消息、角色扮演、摩诃语录等。插件按群隔离数据，支持按群启用/禁用功能。
+**Yiyin-Bot** 是一个基于 **NoneBot2** 与 **NapCat** 的 QQ 群聊机器人。功能包括：塔罗牌占卜、群友语录、食物图鉴、表情包制作、翻译、数学求解、随机选择、贴表情、动漫识别、伪造消息、摩诃语录等。插件按群隔离数据，支持按群启用/禁用功能。
 
 - **运行方式**：Docker Compose 部署，NoneBot 作为主进程，NapCat 作为 OneBot 协议端连接 QQ。
 - **插件加载**：通过 `pyproject.toml` 的 `[tool.nonebot]` 指定插件目录 `yiyin`，并显式加载若干第三方插件。
@@ -73,7 +73,6 @@ Yiyin-Bot/
     ├── wolfram/           # 数学求解 → [wolfram.md](wolfram.md)
     ├── choose/            # 随机选择 → [choose.md](choose.md)
     ├── emoji_reaction/    # 贴表情 → [emoji_reaction.md](emoji_reaction.md)
-    ├── roleplay/          # 角色扮演 → [roleplay.md](roleplay.md)
     ├── mohe/              # 摩诃语录 → [mohe.md](mohe.md)
     └── llmapi/            # 公共 LLM 调用 → [llmapi.md](llmapi.md)
 ```
@@ -95,7 +94,6 @@ Yiyin-Bot/
 | wolfram | [wolfram.md](wolfram.md) | WolframAlpha 数学求解 |
 | choose | [choose.md](choose.md) | 随机选择与特判规则 |
 | emoji_reaction | [emoji_reaction.md](emoji_reaction.md) | 贴表情/发表情 |
-| roleplay | [roleplay.md](roleplay.md) | 37 角色扮演与 LLM 对话 |
 | mohe | [mohe.md](mohe.md) | 摩诃语录与定时推送 |
 | llmapi | [llmapi.md](llmapi.md) | 云雾 API 封装（无命令） |
 

@@ -187,12 +187,12 @@ async def handle_magazine(bot: Bot, event: GroupMessageEvent):
         nodes.append(
             _make_node(bot_name, bot_uin, Message(MessageSegment.text("📖 群友语录")))
         )
-        nodes.append(_make_node(bot_name, bot_uin, quote_nodes))  # 嵌套：content 为节点列表
+        nodes.append(_make_node("群友语录", bot_uin, quote_nodes))  # 嵌套，name 控制外层预览
     if food_nodes:
         nodes.append(
             _make_node(bot_name, bot_uin, Message(MessageSegment.text("🍽️ 食物图鉴")))
         )
-        nodes.append(_make_node(bot_name, bot_uin, food_nodes))  # 嵌套：content 为节点列表
+        nodes.append(_make_node("食物图鉴", bot_uin, food_nodes))  # 嵌套，name 控制外层预览
 
     try:
         await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)

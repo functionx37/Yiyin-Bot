@@ -336,10 +336,10 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
 
     try:
         bot_info = await bot.get_login_info()
-        bot_name = bot_info.get("nickname", "一印Bot")
+        bot_name = bot_info.get("nickname", "YiyinBot")
         bot_uin = str(bot.self_id)
     except Exception:
-        bot_name = "一印Bot"
+        bot_name = "YiyinBot"
         bot_uin = str(bot.self_id)
 
     nodes = [

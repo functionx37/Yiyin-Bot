@@ -23,7 +23,7 @@
 
 ### 抽十连限制
 
-- 内存字典 `_ten_draw_usage: dict[str, date]` 记录每个 user_id 上次使用日期；同一天再次调用则提示「今天已经抽过十次了」。
+- `data/tarot/ten_draw_last_date.json` 记录每个 user_id 上次使用日期（YYYY-MM-DD）；同一天再次调用则提示「今天已经抽过十次了」。重启 Bot 后仍有效。
 
 ### 占卜
 

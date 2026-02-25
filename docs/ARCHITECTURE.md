@@ -67,6 +67,7 @@ Yiyin-Bot/
     ├── tarot/             # 塔罗牌 → [tarot.md](tarot.md)
     ├── quotes/            # 群友语录 → [quotes.md](quotes.md)
     ├── food/              # 食物图鉴 → [food.md](food.md)
+    ├── magazine/          # 群刊 → [magazine.md](magazine.md)
     ├── meme/              # 表情包制作 → [meme.md](meme.md)
     ├── translate/        # 翻译 → [translate.md](translate.md)
     ├── wolfram/           # 数学求解 → [wolfram.md](wolfram.md)
@@ -88,6 +89,7 @@ Yiyin-Bot/
 | tarot | [tarot.md](tarot.md) | 塔罗牌抽牌、十连、占卜、世界通知 |
 | quotes | [quotes.md](quotes.md) | 群友语录与聊天截图生成 |
 | food | [food.md](food.md) | 食物图鉴与「吃什么」 |
+| magazine | [magazine.md](magazine.md) | 群刊（语录+食物合并转发，每群每日一次） |
 | meme | [meme.md](meme.md) | 对称图、强强模板等表情包 |
 | translate | [translate.md](translate.md) | 腾讯云翻译与对外接口 |
 | wolfram | [wolfram.md](wolfram.md) | WolframAlpha 数学求解 |

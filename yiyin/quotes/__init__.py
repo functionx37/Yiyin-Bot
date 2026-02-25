@@ -310,7 +310,7 @@ async def handle_add_alias(
 
 @list_members_cmd.handle()
 async def handle_list_members(bot: Bot, event: GroupMessageEvent):
-    """处理 /群友列表 命令"""
+    """处理 /群友列表 命令：以合并转发（聊天记录）形式发送，避免刷屏"""
     group_id = str(event.group_id)
     members = _load_members(group_id)
 
@@ -332,7 +332,28 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
         alias_str = f"（{'、'.join(alias_list)}）" if alias_list else ""
         lines.append(f"  {i + 1}. {name}{alias_str}：{count}条")
     member_list = "\n".join(lines)
-    await list_members_cmd.finish(f"本群已记录的群友：\n{member_list}")
+    text = f"本群已记录的群友：\n{member_list}"
+
+    try:
+        bot_info = await bot.get_login_info()
+        bot_name = bot_info.get("nickname", "一印Bot")
+        bot_uin = str(bot.self_id)
+    except Exception:
+        bot_name = "一印Bot"
+        bot_uin = str(bot.self_id)
+
+    nodes = [
+        {
+            "type": "node",
+            "data": {
+                "name": bot_name,
+                "uin": bot_uin,
+                "content": Message(MessageSegment.text(text)),
+            },
+        }
+    ]
+    await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+    await list_members_cmd.finish()
 
 
 @upload_cmd.handle()

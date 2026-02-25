@@ -1,23 +1,24 @@
 {
-  "plugins": {
-    "tarot": "塔罗牌",
-    "quotes": "群友语录",
-    "meme": "表情包制作",
-    "wolfram": "数学求解",
-    "translate": "翻译",
-    "choose": "随机选择",
-    "nonebot_plugin_memes": "随机表情",
-    "nonebot_plugin_emojimix": "Emoji合成",
-    "nonebot_plugin_anime_trace": "动漫识别",
-    "emoji_reaction": "贴表情",
-    "food": "食物图鉴"
-  },
-  "optin": {
-    "roleplay": "角色扮演",
-    "nonebot_plugin_fakemsg": "伪造消息"
-  },
-  "hidden": {
-    "world_notify": "世界通知",
-    "mohe": "摩诃"
-  }
+    "plugins": {
+        "tarot": "塔罗牌",
+        "quotes": "群友语录",
+        "magazine": "群刊",
+        "meme": "表情包制作",
+        "wolfram": "数学求解",
+        "translate": "翻译",
+        "choose": "随机选择",
+        "nonebot_plugin_memes": "随机表情",
+        "nonebot_plugin_emojimix": "Emoji合成",
+        "nonebot_plugin_anime_trace": "动漫识别",
+        "emoji_reaction": "贴表情",
+        "food": "食物图鉴"
+    },
+    "optin": {
+        "roleplay": "角色扮演",
+        "nonebot_plugin_fakemsg": "伪造消息"
+    },
+    "hidden": {
+        "world_notify": "世界通知",
+        "mohe": "摩诃"
+    }
 }

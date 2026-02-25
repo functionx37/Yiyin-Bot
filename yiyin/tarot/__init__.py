@@ -29,6 +29,8 @@ from yiyin.llmapi import chat_completion
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 TAROT_JSON_PATH = PROJECT_ROOT / "assets" / "documents" / "tarot.json"
 TAROT_IMAGE_DIR = PROJECT_ROOT / "assets" / "images" / "tarot"
+DATA_DIR = PROJECT_ROOT / "data" / "tarot"
+TEN_DRAW_LAST_DATE_FILE = DATA_DIR / "ten_draw_last_date.json"
 
 # ==================== 加载塔罗牌数据 ====================
 with open(TAROT_JSON_PATH, "r", encoding="utf-8") as f:
@@ -37,9 +39,34 @@ with open(TAROT_JSON_PATH, "r", encoding="utf-8") as f:
 # 构建 id -> 卡牌数据 的映射，方便快速查询
 TAROT_MAP: dict[int, dict] = {card["id"]: card for card in TAROT_DATA}
 
-# ==================== 每日使用记录（抽十连） ====================
-# key: user_id (str), value: 上次使用的日期
-_ten_draw_usage: dict[str, date] = {}
+
+# ==================== 每日使用记录（抽十连，持久化到 data） ====================
+def _ten_draw_used_today(user_id: str) -> bool:
+    """该用户今天是否已抽过十连"""
+    if not TEN_DRAW_LAST_DATE_FILE.exists():
+        return False
+    try:
+        with open(TEN_DRAW_LAST_DATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get(user_id) == date.today().isoformat()
+    except Exception:
+        return False
+
+
+def _ten_draw_mark_used_today(user_id: str) -> None:
+    """记录该用户今日已抽十连"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        if TEN_DRAW_LAST_DATE_FILE.exists():
+            with open(TEN_DRAW_LAST_DATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {}
+        data[user_id] = date.today().isoformat()
+        with open(TEN_DRAW_LAST_DATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 # ==================== 世界牌 ID ====================
 WORLD_CARD_ID = 21
@@ -122,16 +149,15 @@ async def handle_tarot_ten(bot: Bot, event: MessageEvent):
     """处理 /抽十连 命令：一次抽 10 张，精简输出，每用户每天限一次"""
 
     user_id = event.get_user_id()
-    today = date.today()
 
-    # 每日限制检查
-    if _ten_draw_usage.get(user_id) == today:
+    # 每日限制检查（持久化到 data，重启 Bot 仍有效）
+    if _ten_draw_used_today(user_id):
         await tarot_ten_cmd.finish(
             MessageSegment.at(user_id) + " 你今天已经抽过十次了，明天再来吧~"
         )
 
     # 记录本次使用日期
-    _ten_draw_usage[user_id] = today
+    _ten_draw_mark_used_today(user_id)
 
     # 抽取 10 张牌（可重复）
     lines: list[str] = []

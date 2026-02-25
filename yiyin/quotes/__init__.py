@@ -3,20 +3,20 @@ NoneBot2 群友语录插件
 - 命令：/新增群友 <群友昵称>
 - 命令：/新增别名 <已有昵称> <别名>
 - 命令：/群友列表
-- 命令：/上传 <群友昵称> [图片]
+- 命令：/上传 <群友昵称> [图片]（支持多张图片含引用，依次处理；出错回滚）
 - 命令：/截图上传 <群友昵称> [引用消息]
 - 命令：/查看 <群友昵称>（以合并转发发送该群友全部语录，格式「ID」【对应截图】）
 - 命令：/随机群友 [昵称]（等概率随机一个有语录的群友再随机一条；指定昵称则从该群友语录中随机）
 - 命令：/随机语录（从本群全部语录中随机抽取一条）
 - 命令：/随机精华（从群精华消息中随机抽一条，格式：昵称：内容）
 - 命令：/删除语录 <ID>（仅超级管理员）
+- 命令：/删除群友 <昵称>（仅超级管理员，打上删除标记，不再显示但不清理 data）
 - 功能：记录并随机查看群友的发言截图
 """
 
 import json
 import random
 import string
-import uuid
 from pathlib import Path
 
 import httpx
@@ -45,6 +45,29 @@ def _get_members_file(group_id: str) -> Path:
 def _get_aliases_file(group_id: str) -> Path:
     """获取群组别名映射文件路径"""
     return _get_group_dir(group_id) / "aliases.json"
+
+
+def _get_deleted_members_file(group_id: str) -> Path:
+    """获取已删除群友列表文件路径"""
+    return _get_group_dir(group_id) / "deleted_members.json"
+
+
+def _load_deleted_members(group_id: str) -> set[str]:
+    """加载已删除群友集合（打上删除标记后不再显示，但不清理 data）"""
+    f = _get_deleted_members_file(group_id)
+    if not f.exists():
+        return set()
+    with open(f, "r", encoding="utf-8") as fp:
+        data = json.load(fp)
+    return set(data) if isinstance(data, list) else set()
+
+
+def _save_deleted_members(group_id: str, deleted: set[str]) -> None:
+    """保存已删除群友列表"""
+    f = _get_deleted_members_file(group_id)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    with open(f, "w", encoding="utf-8") as fp:
+        json.dump(sorted(deleted), fp, ensure_ascii=False, indent=2)
 
 
 def _get_member_image_dir(group_id: str, member_name: str) -> Path:
@@ -86,16 +109,22 @@ def _save_aliases(group_id: str, aliases: dict[str, str]) -> None:
         json.dump(aliases, f, ensure_ascii=False, indent=2)
 
 
-def _resolve_name(group_id: str, name: str) -> str | None:
-    """将输入名称解析为主昵称，支持别名查找。未找到返回 None。"""
+def _resolve_name(group_id: str, name: str, exclude_deleted: bool = False) -> str | None:
+    """将输入名称解析为主昵称，支持别名查找。未找到返回 None。
+    exclude_deleted=True 时，若解析结果为已删除群友则返回 None。"""
     members = _load_members(group_id)
     if name in members:
-        return name
-    aliases = _load_aliases(group_id)
-    canonical = aliases.get(name)
-    if canonical and canonical in members:
-        return canonical
-    return None
+        canonical = name
+    else:
+        aliases = _load_aliases(group_id)
+        canonical = aliases.get(name)
+        if not canonical or canonical not in members:
+            return None
+    if exclude_deleted:
+        deleted = _load_deleted_members(group_id)
+        if canonical in deleted:
+            return None
+    return canonical
 
 
 def _get_index_file(group_id: str) -> Path:
@@ -113,8 +142,8 @@ def _generate_short_id(existing_ids: set[str]) -> str:
 
 
 def _load_index(group_id: str) -> dict[str, dict]:
-    """加载语录索引 {short_id: {"member": str, "filename": str}}，
-    首次加载时自动为已有图片生成索引。"""
+    """加载语录索引 {short_id: {"member": str}}，图片文件名为 {short_id}.png。
+    首次加载时自动为已有图片（旧格式或未索引）生成索引并规范化命名。"""
     index_file = _get_index_file(group_id)
     if index_file.exists():
         with open(index_file, "r", encoding="utf-8") as f:
@@ -122,9 +151,15 @@ def _load_index(group_id: str) -> dict[str, dict]:
     else:
         index = {}
 
-    indexed_files: set[str] = set()
-    for entry in index.values():
-        indexed_files.add(f"{entry['member']}/{entry['filename']}")
+    indexed_keys: set[str] = set()
+    for short_id, entry in index.items():
+        member = entry.get("member")
+        if not member:
+            continue
+        indexed_keys.add(f"{member}/{short_id}")  # 新格式: 文件为 short_id.png
+        fn = entry.get("filename")
+        if fn:
+            indexed_keys.add(f"{member}/{fn}")  # 旧格式兼容
 
     images_dir = _get_group_dir(group_id) / "images"
     changed = False
@@ -135,14 +170,22 @@ def _load_index(group_id: str) -> dict[str, dict]:
                 continue
             member_name = member_dir.name
             for img_file in member_dir.glob("*.*"):
-                key = f"{member_name}/{img_file.name}"
-                if key not in indexed_files:
+                if img_file.suffix.lower() not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+                    continue
+                key_name = f"{member_name}/{img_file.name}"
+                key_stem = f"{member_name}/{img_file.stem}"
+                if key_name in indexed_keys or key_stem in indexed_keys:
+                    continue
+                if img_file.stem in existing_ids:
+                    continue
                     short_id = _generate_short_id(existing_ids)
                     existing_ids.add(short_id)
-                    index[short_id] = {
-                        "member": member_name,
-                        "filename": img_file.name,
-                    }
+                    new_path = member_dir / f"{short_id}.png"
+                    if img_file != new_path:
+                        img_file.rename(new_path)
+                        img_file = new_path
+                    index[short_id] = {"member": member_name}
+                    indexed_keys.add(f"{member_name}/{short_id}")
                     changed = True
 
     if changed:
@@ -158,30 +201,36 @@ def _save_index(group_id: str, index: dict[str, dict]) -> None:
         json.dump(index, f, ensure_ascii=False, indent=2)
 
 
-def _add_to_index(group_id: str, member: str, filename: str) -> str:
-    """向索引中添加一条记录，返回生成的短ID"""
+def _add_to_index(group_id: str, member: str) -> str:
+    """向索引中添加一条记录，返回生成的短ID。图片需保存为 images/{member}/{short_id}.png"""
     index = _load_index(group_id)
     existing_ids = set(index.keys())
     short_id = _generate_short_id(existing_ids)
-    index[short_id] = {"member": member, "filename": filename}
+    index[short_id] = {"member": member}
     _save_index(group_id, index)
     return short_id
 
 
-def _find_id_by_filepath(group_id: str, member: str, filename: str) -> str | None:
-    """通过成员名和文件名查找短ID"""
+def _id_from_image_path(group_id: str, member: str, filepath: Path) -> str | None:
+    """从图片路径推断 short_id：新格式直接取 stem，旧格式按 filename 查找"""
     index = _load_index(group_id)
-    for short_id, entry in index.items():
-        if entry["member"] == member and entry["filename"] == filename:
-            return short_id
+    short_id = filepath.stem
+    if short_id in index and index[short_id].get("member") == member:
+        return short_id
+    for sid, entry in index.items():
+        if entry.get("member") == member and entry.get("filename") == filepath.name:
+            return sid
     return None
 
 
 def _get_members_with_quotes(group_id: str) -> list[str]:
-    """返回有语录的群友主昵称列表（用于等概率随机群友）"""
+    """返回有语录的群友主昵称列表（用于等概率随机群友），排除已删除群友"""
     members = _load_members(group_id)
+    deleted = _load_deleted_members(group_id)
     result = []
     for name in members:
+        if name in deleted:
+            continue
         image_dir = _get_member_image_dir(group_id, name)
         if image_dir.exists() and list(image_dir.glob("*.*")):
             result.append(name)
@@ -191,41 +240,38 @@ def _get_members_with_quotes(group_id: str) -> list[str]:
 async def _extract_images(
     bot: Bot, event: GroupMessageEvent, args: Message
 ) -> list[MessageSegment]:
-    """从命令参数和引用消息中提取图片"""
-    images = [seg for seg in args if seg.type == "image"]
-    if images:
-        return images
-
-    if not event.reply:
-        return []
-
-    # 从 event.reply.message 中提取
-    if event.reply.message:
-        reply_images = [seg for seg in event.reply.message if seg.type == "image"]
-        if reply_images:
-            return reply_images
-
-    # 兜底：通过 API 获取原始消息
-    try:
-        msg_data = await bot.get_msg(message_id=event.reply.message_id)
-        raw_msg = msg_data.get("message", [])
-        if isinstance(raw_msg, Message):
-            return [seg for seg in raw_msg if seg.type == "image"]
-        if isinstance(raw_msg, str):
-            parsed = Message(raw_msg)
-            return [seg for seg in parsed if seg.type == "image"]
-        if isinstance(raw_msg, list):
-            result = []
-            for seg in raw_msg:
-                if isinstance(seg, MessageSegment) and seg.type == "image":
-                    result.append(seg)
-                elif isinstance(seg, dict) and seg.get("type") == "image":
-                    result.append(MessageSegment("image", seg.get("data", {})))
-            return result
-    except Exception:
-        pass
-
-    return []
+    """从命令参数和引用消息中提取图片，支持多张图片（含引用）依次处理"""
+    images: list[MessageSegment] = []
+    # 1. 命令参数中的图片
+    for seg in args:
+        if seg.type == "image":
+            images.append(seg)
+    # 2. 引用消息中的图片
+    if event.reply:
+        reply_images: list[MessageSegment] = []
+        if event.reply.message:
+            reply_images = [seg for seg in event.reply.message if seg.type == "image"]
+        if not reply_images:
+            try:
+                msg_data = await bot.get_msg(message_id=event.reply.message_id)
+                raw_msg = msg_data.get("message", [])
+                if isinstance(raw_msg, Message):
+                    reply_images = [seg for seg in raw_msg if seg.type == "image"]
+                elif isinstance(raw_msg, str):
+                    parsed = Message(raw_msg)
+                    reply_images = [seg for seg in parsed if seg.type == "image"]
+                elif isinstance(raw_msg, list):
+                    for seg in raw_msg:
+                        if isinstance(seg, MessageSegment) and seg.type == "image":
+                            reply_images.append(seg)
+                        elif isinstance(seg, dict) and seg.get("type") == "image":
+                            reply_images.append(
+                                MessageSegment("image", seg.get("data", {}))
+                            )
+            except Exception:
+                pass
+        images.extend(reply_images)
+    return images
 
 
 # ==================== 注册命令 ====================
@@ -240,6 +286,9 @@ random_quote_cmd = on_command("随机语录", priority=10, block=True)
 random_essence_cmd = on_command("随机精华", priority=10, block=True)
 delete_quote_cmd = on_command(
     "删除语录", priority=10, block=True, permission=SUPERUSER
+)
+delete_member_cmd = on_command(
+    "删除群友", priority=10, block=True, permission=SUPERUSER
 )
 
 
@@ -313,8 +362,10 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
     """处理 /群友列表 命令：以合并转发（聊天记录）形式发送，避免刷屏"""
     group_id = str(event.group_id)
     members = _load_members(group_id)
+    deleted = _load_deleted_members(group_id)
 
-    if not members:
+    visible = [m for m in members if m not in deleted]
+    if not visible:
         await list_members_cmd.finish(
             "本群还没有记录任何群友，使用 /新增群友 <昵称> 来添加吧"
         )
@@ -325,12 +376,14 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
         alias_map.setdefault(canonical, []).append(alias)
 
     lines = []
-    for i, name in enumerate(members):
+    idx = 0
+    for name in visible:
+        idx += 1
         image_dir = _get_member_image_dir(group_id, name)
         count = len(list(image_dir.glob("*.*"))) if image_dir.exists() else 0
         alias_list = alias_map.get(name, [])
         alias_str = f"（{'、'.join(alias_list)}）" if alias_list else ""
-        lines.append(f"  {i + 1}. {name}{alias_str}：{count}条")
+        lines.append(f"  {idx}. {name}{alias_str}：{count}条")
     member_list = "\n".join(lines)
     text = f"本群已记录的群友：\n{member_list}"
 
@@ -360,15 +413,18 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
 async def handle_upload(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /上传 命令"""
+    """处理 /上传 命令：支持多张图片（含引用），全部成功才写入，任一出错则回滚"""
     name = args.extract_plain_text().strip()
     if not name:
         await upload_cmd.finish("请输入群友昵称并附带图片，例如：/上传 小明 [图片]")
 
     group_id = str(event.group_id)
+    deleted = _load_deleted_members(group_id)
+    canonical = _resolve_name(group_id, name, exclude_deleted=False)
+    if canonical and canonical in deleted:
+        await upload_cmd.finish(f"群友「{canonical}」已被删除，无法上传")
 
     auto_registered = False
-    canonical = _resolve_name(group_id, name)
     if not canonical:
         members = _load_members(group_id)
         members.append(name)
@@ -382,10 +438,13 @@ async def handle_upload(
             "请在命令中附带图片或引用含图片的消息，例如：/上传 小明 [图片]"
         )
 
+    # 先下载全部图片，任一出错则不改动任何 JSON
     image_dir = _get_member_image_dir(group_id, canonical)
     image_dir.mkdir(parents=True, exist_ok=True)
+    downloaded: list[tuple[str, bytes]] = []  # (short_id, content)
 
-    saved_ids: list[str] = []
+    index = _load_index(group_id)
+    existing_ids = set(index.keys())
     async with httpx.AsyncClient(follow_redirects=True) as client:
         for img_seg in images:
             url = img_seg.data.get("url")
@@ -394,22 +453,47 @@ async def handle_upload(
             try:
                 resp = await client.get(url, timeout=30)
                 resp.raise_for_status()
-                filename = f"{uuid.uuid4().hex}.png"
-                filepath = image_dir / filename
-                filepath.write_bytes(resp.content)
-                short_id = _add_to_index(group_id, canonical, filename)
-                saved_ids.append(short_id)
+                short_id = _generate_short_id(existing_ids)
+                existing_ids.add(short_id)
+                downloaded.append((short_id, resp.content))
             except Exception:
                 logger.exception(f"下载语录图片失败: {url}")
-                continue
+                if auto_registered:
+                    members = _load_members(group_id)
+                    members.remove(canonical)
+                    _save_members(group_id, members)
+                await upload_cmd.finish(
+                    f"图片下载失败，已回滚（未修改数据），请稍后重试"
+                )
 
-    if not saved_ids:
-        await upload_cmd.finish("图片下载失败，请稍后重试")
+    if not downloaded:
+        if auto_registered:
+            members = _load_members(group_id)
+            members.remove(canonical)
+            _save_members(group_id, members)
+        await upload_cmd.finish("未获取到有效图片，请检查后重试")
+
+    # 全部下载成功，再写入 index 和文件（任一步失败则回滚）
+    try:
+        for short_id, content in downloaded:
+            index[short_id] = {"member": canonical}
+            filepath = image_dir / f"{short_id}.png"
+            filepath.write_bytes(content)
+        _save_index(group_id, index)
+    except Exception:
+        logger.exception("保存语录文件失败，回滚")
+        for short_id, _ in downloaded:
+            (image_dir / f"{short_id}.png").unlink(missing_ok=True)
+        if auto_registered:
+            members = _load_members(group_id)
+            members.remove(canonical)
+            _save_members(group_id, members)
+        await upload_cmd.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
     prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
-    id_str = "、".join(saved_ids)
+    id_str = "、".join(sid for sid, _ in downloaded)
     await upload_cmd.finish(
-        f"{prefix}已成功为群友「{canonical}」保存 {len(saved_ids)} 张语录截图✓\n"
+        f"{prefix}已成功为群友「{canonical}」保存 {len(downloaded)} 张语录截图✓\n"
         f"语录ID：{id_str}"
     )
 
@@ -459,7 +543,7 @@ async def _extract_reply_text(bot: Bot, event: GroupMessageEvent) -> str:
 async def handle_screenshot_upload(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /截图上传 命令：引用消息生成聊天截图并保存为语录"""
+    """处理 /截图上传 命令：引用消息生成聊天截图并保存为语录，出错则回滚"""
     from .draw import async_generate_chat_screenshot
 
     name = args.extract_plain_text().strip()
@@ -501,12 +585,20 @@ async def handle_screenshot_upload(
             logger.exception(f"下载头像失败: {sender_id}")
             avatar_bytes = b""
 
-    screenshot_bytes = await async_generate_chat_screenshot(
-        avatar_bytes, sender_nick, reply_text
-    )
+    try:
+        screenshot_bytes = await async_generate_chat_screenshot(
+            avatar_bytes, sender_nick, reply_text
+        )
+    except Exception:
+        logger.exception("生成截图失败")
+        await screenshot_upload_cmd.finish("生成截图失败，请稍后重试")
+
+    deleted = _load_deleted_members(group_id)
+    canonical = _resolve_name(group_id, name, exclude_deleted=False)
+    if canonical and canonical in deleted:
+        await screenshot_upload_cmd.finish(f"群友「{canonical}」已被删除，无法上传")
 
     auto_registered = False
-    canonical = _resolve_name(group_id, name)
     if not canonical:
         members = _load_members(group_id)
         members.append(name)
@@ -516,10 +608,21 @@ async def handle_screenshot_upload(
 
     image_dir = _get_member_image_dir(group_id, canonical)
     image_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{uuid.uuid4().hex}.png"
-    filepath = image_dir / filename
-    filepath.write_bytes(screenshot_bytes)
-    short_id = _add_to_index(group_id, canonical, filename)
+    index = _load_index(group_id)
+    short_id = _generate_short_id(set(index.keys()))
+    try:
+        index[short_id] = {"member": canonical}
+        filepath = image_dir / f"{short_id}.png"
+        filepath.write_bytes(screenshot_bytes)
+        _save_index(group_id, index)
+    except Exception:
+        logger.exception("保存截图失败，回滚")
+        (image_dir / f"{short_id}.png").unlink(missing_ok=True)
+        if auto_registered:
+            members = _load_members(group_id)
+            members.remove(canonical)
+            _save_members(group_id, members)
+        await screenshot_upload_cmd.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
     prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
     msg = MessageSegment.text(
@@ -555,7 +658,7 @@ async def handle_view(
         await view_cmd.finish("请输入群友昵称，例如：/查看 小明")
 
     group_id = str(event.group_id)
-    canonical = _resolve_name(group_id, name)
+    canonical = _resolve_name(group_id, name, exclude_deleted=True)
 
     if not canonical:
         await view_cmd.finish(
@@ -584,10 +687,8 @@ async def handle_view(
     nodes = []
     images_dir = _get_group_dir(group_id) / "images" / canonical
     for short_id, entry in member_entries:
-        filename = entry.get("filename")
-        if not filename:
-            continue
-        filepath = images_dir / filename
+        fn = entry.get("filename") or f"{short_id}.png"
+        filepath = images_dir / fn
         if not filepath.exists():
             continue
         try:
@@ -623,7 +724,7 @@ async def handle_random_member(
 
     if name_arg:
         # 指定了昵称：从该群友的语录中随机一条
-        canonical = _resolve_name(group_id, name_arg)
+        canonical = _resolve_name(group_id, name_arg, exclude_deleted=True)
         if not canonical:
             await random_member_cmd.finish(
                 f"群友「{name_arg}」不存在，请先使用 /新增群友 {name_arg} 添加"
@@ -653,7 +754,7 @@ async def handle_random_member(
         chosen_file = random.choice(image_files)
 
     image_bytes = chosen_file.read_bytes()
-    short_id = _find_id_by_filepath(group_id, chosen_name, chosen_file.name)
+    short_id = _id_from_image_path(group_id, chosen_name, chosen_file)
     id_hint = f"（ID：{short_id}）" if short_id else ""
     msg = MessageSegment.text(
         f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
@@ -666,6 +767,7 @@ async def handle_random_quote(bot: Bot, event: GroupMessageEvent):
     """处理 /随机语录 命令：从本群全部语录中随机抽取一条"""
     group_id = str(event.group_id)
     members = _load_members(group_id)
+    deleted = _load_deleted_members(group_id)
 
     if not members:
         await random_quote_cmd.finish(
@@ -674,6 +776,8 @@ async def handle_random_quote(bot: Bot, event: GroupMessageEvent):
 
     all_quotes: list[tuple[str, Path]] = []
     for name in members:
+        if name in deleted:
+            continue
         image_dir = _get_member_image_dir(group_id, name)
         if image_dir.exists():
             for img_file in image_dir.glob("*.*"):
@@ -687,7 +791,7 @@ async def handle_random_quote(bot: Bot, event: GroupMessageEvent):
     chosen_name, chosen_file = random.choice(all_quotes)
     image_bytes = chosen_file.read_bytes()
 
-    short_id = _find_id_by_filepath(group_id, chosen_name, chosen_file.name)
+    short_id = _id_from_image_path(group_id, chosen_name, chosen_file)
     id_hint = f"（ID：{short_id}）" if short_id else ""
     msg = MessageSegment.text(
         f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
@@ -784,9 +888,8 @@ async def handle_delete_quote(
 
     entry = index[quote_id]
     member = entry["member"]
-    filename = entry["filename"]
-
-    filepath = _get_member_image_dir(group_id, member) / filename
+    fn = entry.get("filename") or f"{quote_id}.png"
+    filepath = _get_member_image_dir(group_id, member) / fn
     if filepath.exists():
         filepath.unlink()
 
@@ -795,4 +898,33 @@ async def handle_delete_quote(
 
     await delete_quote_cmd.finish(
         f"已删除群友「{member}」的语录（ID：{quote_id}）✓"
+    )
+
+
+@delete_member_cmd.handle()
+async def handle_delete_member(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    """处理 /删除群友 命令（仅超级管理员）：打上删除标记，此后不再显示，但不清理 data"""
+    name = args.extract_plain_text().strip()
+    if not name:
+        await delete_member_cmd.finish(
+            "请输入要删除的群友昵称，例如：/删除群友 小明"
+        )
+
+    group_id = str(event.group_id)
+    canonical = _resolve_name(group_id, name, exclude_deleted=False)
+    if not canonical:
+        await delete_member_cmd.finish(
+            f"群友「{name}」不存在，请检查昵称或别名后重试"
+        )
+
+    deleted = _load_deleted_members(group_id)
+    if canonical in deleted:
+        await delete_member_cmd.finish(f"群友「{canonical}」已被标记删除")
+
+    deleted.add(canonical)
+    _save_deleted_members(group_id, deleted)
+    await delete_member_cmd.finish(
+        f"已为群友「{canonical}」打上删除标记，此后所有调用不再显示✓"
     )

@@ -107,16 +107,29 @@ def _mark_used_today(group_id: str) -> None:
         logger.warning(f"群刊记录使用日期失败 group={group_id}: {e}")
 
 
+def _load_deleted_members(group_id: str) -> set:
+    deleted_file = QUOTES_DIR / group_id / "deleted_members.json"
+    if not deleted_file.exists():
+        return set()
+    try:
+        with open(deleted_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return set(data) if isinstance(data, list) else set()
+    except Exception:
+        return set()
+
+
 def _build_quote_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]:
     index = _load_quotes_index(group_id)
+    deleted = _load_deleted_members(group_id)
     images_dir = QUOTES_DIR / group_id / "images"
     nodes = []
     for short_id, entry in index.items():
         member = entry.get("member") or short_id
-        filename = entry.get("filename")
-        if not filename:
+        if member in deleted:
             continue
-        filepath = images_dir / member / filename
+        fn = entry.get("filename") or f"{short_id}.png"
+        filepath = images_dir / member / fn
         if not filepath.exists():
             continue
         try:
@@ -136,10 +149,8 @@ def _build_food_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]:
     for short_id, entry in index.items():
         name = entry.get("name")
         display = (name.strip() if name and name.strip() else short_id)
-        filename = entry.get("filename")
-        if not filename:
-            continue
-        filepath = images_dir / filename
+        fn = entry.get("filename") or f"{short_id}.png"
+        filepath = images_dir / fn
         if not filepath.exists():
             continue
         try:

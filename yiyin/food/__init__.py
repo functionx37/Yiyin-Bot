@@ -10,7 +10,6 @@ NoneBot2 食物图鉴插件（按群隔离）
 import json
 import random
 import string
-import uuid
 from pathlib import Path
 
 import httpx
@@ -48,7 +47,7 @@ def _generate_short_id(existing_ids: set[str]) -> str:
 
 
 def _load_index(group_id: str) -> dict[str, dict]:
-    """加载索引 {short_id: {"filename": str, "name": str | None}}"""
+    """加载索引 {short_id: {"name": str | None}}，图片文件名为 {short_id}.png"""
     index_file = _get_index_file(group_id)
     if not index_file.exists():
         return {}
@@ -63,12 +62,12 @@ def _save_index(group_id: str, index: dict[str, dict]) -> None:
         json.dump(index, f, ensure_ascii=False, indent=2)
 
 
-def _add_to_index(group_id: str, filename: str, name: str | None) -> str:
-    """向索引添加一条，返回 short_id"""
+def _add_to_index(group_id: str, name: str | None) -> str:
+    """向索引添加一条，返回 short_id。图片需保存为 images/{short_id}.png"""
     index = _load_index(group_id)
     existing = set(index.keys())
     short_id = _generate_short_id(existing)
-    index[short_id] = {"filename": filename, "name": name}
+    index[short_id] = {"name": name}
     _save_index(group_id, index)
     return short_id
 
@@ -76,35 +75,36 @@ def _add_to_index(group_id: str, filename: str, name: str | None) -> str:
 async def _extract_images(
     bot: Bot, event: GroupMessageEvent, args: Message
 ) -> list[MessageSegment]:
-    """从命令参数和引用消息中提取图片"""
-    images = [seg for seg in args if seg.type == "image"]
-    if images:
-        return images
-    if not event.reply:
-        return []
-    if event.reply.message:
-        reply_images = [seg for seg in event.reply.message if seg.type == "image"]
-        if reply_images:
-            return reply_images
-    try:
-        msg_data = await bot.get_msg(message_id=event.reply.message_id)
-        raw_msg = msg_data.get("message", [])
-        if isinstance(raw_msg, Message):
-            return [seg for seg in raw_msg if seg.type == "image"]
-        if isinstance(raw_msg, str):
-            parsed = Message(raw_msg)
-            return [seg for seg in parsed if seg.type == "image"]
-        if isinstance(raw_msg, list):
-            result = []
-            for seg in raw_msg:
-                if isinstance(seg, MessageSegment) and seg.type == "image":
-                    result.append(seg)
-                elif isinstance(seg, dict) and seg.get("type") == "image":
-                    result.append(MessageSegment("image", seg.get("data", {})))
-            return result
-    except Exception:
-        pass
-    return []
+    """从命令参数和引用消息中提取图片，支持多张图片（含引用）依次处理"""
+    images: list[MessageSegment] = []
+    for seg in args:
+        if seg.type == "image":
+            images.append(seg)
+    if event.reply:
+        reply_images: list[MessageSegment] = []
+        if event.reply.message:
+            reply_images = [seg for seg in event.reply.message if seg.type == "image"]
+        if not reply_images:
+            try:
+                msg_data = await bot.get_msg(message_id=event.reply.message_id)
+                raw_msg = msg_data.get("message", [])
+                if isinstance(raw_msg, Message):
+                    reply_images = [seg for seg in raw_msg if seg.type == "image"]
+                elif isinstance(raw_msg, str):
+                    parsed = Message(raw_msg)
+                    reply_images = [seg for seg in parsed if seg.type == "image"]
+                elif isinstance(raw_msg, list):
+                    for seg in raw_msg:
+                        if isinstance(seg, MessageSegment) and seg.type == "image":
+                            reply_images.append(seg)
+                        elif isinstance(seg, dict) and seg.get("type") == "image":
+                            reply_images.append(
+                                MessageSegment("image", seg.get("data", {}))
+                            )
+            except Exception:
+                pass
+        images.extend(reply_images)
+    return images
 
 
 def _format_food_label(short_id: str, name: str | None) -> str:
@@ -130,10 +130,9 @@ what_to_eat_matcher = on_keyword({"吃什么"}, priority=50, block=False)
 async def handle_collect_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /收集食物 [名字] [图片]"""
+    """处理 /收集食物 [名字] [图片]：全部下载成功才写入，任一出错则回滚"""
     group_id = str(event.group_id)
     text = args.extract_plain_text().strip()
-    # 名字参数可选，可能为空
     name = text if text else None
 
     images = await _extract_images(bot, event, args)
@@ -142,10 +141,11 @@ async def handle_collect_food(
             "请在命令中附带图片或引用含图片的消息，例如：/收集食物 蛋炒饭 [图片]"
         )
 
-    images_dir = _get_images_dir(group_id)
-    images_dir.mkdir(parents=True, exist_ok=True)
+    # 先下载全部图片，任一出错则不改动 index.json
+    index = _load_index(group_id)
+    existing_ids = set(index.keys())
+    downloaded: list[tuple[str, bytes]] = []  # (short_id, content)
 
-    saved_ids: list[str] = []
     async with httpx.AsyncClient(follow_redirects=True) as client:
         for img_seg in images:
             url = img_seg.data.get("url")
@@ -154,22 +154,37 @@ async def handle_collect_food(
             try:
                 resp = await client.get(url, timeout=30)
                 resp.raise_for_status()
-                filename = f"{uuid.uuid4().hex}.png"
-                filepath = images_dir / filename
-                filepath.write_bytes(resp.content)
-                short_id = _add_to_index(group_id, filename, name)
-                saved_ids.append(short_id)
+                short_id = _generate_short_id(existing_ids)
+                existing_ids.add(short_id)
+                downloaded.append((short_id, resp.content))
             except Exception:
                 logger.exception(f"下载食物图片失败: {url}")
-                continue
+                await collect_food_cmd.finish(
+                    "图片下载失败，已回滚（未修改数据），请稍后重试"
+                )
 
-    if not saved_ids:
-        await collect_food_cmd.finish("图片下载失败，请稍后重试")
+    if not downloaded:
+        await collect_food_cmd.finish("未获取到有效图片，请检查后重试")
 
-    id_str = "、".join(saved_ids)
+    # 全部下载成功，再写入 index 和文件（任一步失败则回滚）
+    images_dir = _get_images_dir(group_id)
+    images_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        for short_id, content in downloaded:
+            index[short_id] = {"name": name}
+            filepath = images_dir / f"{short_id}.png"
+            filepath.write_bytes(content)
+        _save_index(group_id, index)
+    except Exception:
+        logger.exception("保存食物文件失败，回滚")
+        for short_id, _ in downloaded:
+            (images_dir / f"{short_id}.png").unlink(missing_ok=True)
+        await collect_food_cmd.finish("保存失败，已回滚（未修改数据），请稍后重试")
+
+    id_str = "、".join(sid for sid, _ in downloaded)
     name_hint = f"「{name}」" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
     await collect_food_cmd.finish(
-        f"已保存 {len(saved_ids)} 张食物图✓ {name_hint}\n食物ID：{id_str}"
+        f"已保存 {len(downloaded)} 张食物图✓ {name_hint}\n食物ID：{id_str}"
     )
 
 
@@ -188,8 +203,8 @@ async def handle_delete_food(
         await delete_food_cmd.finish(f"食物ID「{food_id}」不存在，请检查后重试")
 
     entry = index[food_id]
-    filename = entry["filename"]
-    filepath = _get_images_dir(group_id) / filename
+    fn = entry.get("filename") or f"{food_id}.png"
+    filepath = _get_images_dir(group_id) / fn
     if filepath.exists():
         filepath.unlink()
     del index[food_id]
@@ -257,7 +272,8 @@ async def handle_feast(
         ordinal = "第一道菜" if i == 1 else f"第{i}道菜"
         text_seg = MessageSegment.text(f"{ordinal}：{label}\n")
         parts.append(text_seg)
-        filepath = images_dir / entry["filename"]
+        fn = entry.get("filename") or f"{short_id}.png"
+        filepath = images_dir / fn
         if filepath.exists():
             parts.append(MessageSegment.image(filepath.read_bytes()))
     await feast_cmd.finish(Message(parts))
@@ -276,7 +292,8 @@ async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
     entry = index[short_id]
     name = entry.get("name") or None
     label = _format_food_label(short_id, name)
-    filepath = _get_images_dir(group_id) / entry["filename"]
+    fn = entry.get("filename") or f"{short_id}.png"
+    filepath = _get_images_dir(group_id) / fn
     if not filepath.exists():
         return
 

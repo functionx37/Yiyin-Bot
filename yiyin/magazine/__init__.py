@@ -26,7 +26,33 @@ MAGAZINE_DIR = DATA_DIR / "magazine"
 LAST_DATE_FILE = MAGAZINE_DIR / "last_date.json"
 
 
-def _make_node(name: str, uin: str, content: Message) -> dict:
+def _message_to_content(msg: Message) -> list[dict]:
+    """Message 转为 OneBot API 可序列化的 content 格式"""
+    result = []
+    for seg in msg:
+        data = {k: v for k, v in seg.data.items() if v is not None}
+        result.append({"type": seg.type, "data": data})
+    return result
+
+
+def _make_node(name: str, uin: str, content: Message | list[dict]) -> dict:
+    """content 为 Message 或嵌套的节点列表。嵌套时内层节点 content 需为可序列化格式。"""
+    if isinstance(content, Message):
+        content = _message_to_content(content)
+    elif isinstance(content, list):
+        # 嵌套节点：将内层节点的 Message content 转为可序列化格式
+        content = [
+            {
+                "type": n["type"],
+                "data": {
+                    **n["data"],
+                    "content": _message_to_content(n["data"]["content"])
+                    if isinstance(n["data"].get("content"), Message)
+                    else n["data"]["content"],
+                },
+            }
+            for n in content
+        ]
     return {"type": "node", "data": {"name": name, "uin": uin, "content": content}}
 
 
@@ -155,18 +181,18 @@ async def handle_magazine(bot: Bot, event: GroupMessageEvent):
         await bot.send(event, "本群暂无语录与食物记录，无法生成群刊。")
         return
 
-    # 所有内容合并到一个 [聊天记录] 里，用标题节点分隔各段
+    # 嵌套结构：外层 [聊天记录] 含 4 项 — 标题(普通) / [语录聊天记录] / 标题(普通) / [食物聊天记录]
     nodes: list[dict] = []
     if quote_nodes:
         nodes.append(
             _make_node(bot_name, bot_uin, Message(MessageSegment.text("📖 群友语录")))
         )
-        nodes.extend(quote_nodes)
+        nodes.append(_make_node(bot_name, bot_uin, quote_nodes))  # 嵌套：content 为节点列表
     if food_nodes:
         nodes.append(
             _make_node(bot_name, bot_uin, Message(MessageSegment.text("🍽️ 食物图鉴")))
         )
-        nodes.extend(food_nodes)
+        nodes.append(_make_node(bot_name, bot_uin, food_nodes))  # 嵌套：content 为节点列表
 
     try:
         await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)

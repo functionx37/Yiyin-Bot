@@ -31,11 +31,6 @@
 - 系统 prompt：占卜师人设，要求 3–5 句话整体解读、可点出关键牌。
 - 调用 `yiyin.llmapi.chat_completion`（如模型 `claude-haiku-4-5-20251001`），返回内容去掉首尾引号后回复。
 
-### 世界通知
-
-- 抽到牌 id=21 且正位时，若 `is_feature_enabled("world_notify", group_id)` 为真，则 `get_group_member_list` 取群主，发送 at + 「世界！」。
-- 「世界通知」在 `config/features.json` 的 `hidden` 中，需群内单独启用。
-
 ---
 
 ## 依赖

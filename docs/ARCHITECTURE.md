@@ -21,7 +21,6 @@
 | 协议端   | NapCat（Docker 镜像） |
 | 包管理   | uv、pyproject.toml |
 | 图像     | Pillow、pilmoji |
-| 调度     | nonebot-plugin-apscheduler |
 | 数据库/ORM | nonebot-plugin-orm（可选） |
 | 第三方插件 | nonebot-plugin-memes、nonebot-plugin-emojimix、nonebot-plugin-anime-trace、nonebot-plugin-fakemsg |
 
@@ -94,7 +93,7 @@ Yiyin-Bot/
 | wolfram | [wolfram.md](wolfram.md) | WolframAlpha 数学求解 |
 | choose | [choose.md](choose.md) | 随机选择与特判规则 |
 | emoji_reaction | [emoji_reaction.md](emoji_reaction.md) | 贴表情/发表情 |
-| mohe | [mohe.md](mohe.md) | 摩诃语录与定时推送 |
+| mohe | [mohe.md](mohe.md) | 摩诃语录 |
 | llmapi | [llmapi.md](llmapi.md) | 云雾 API 封装（无命令） |
 
 ---

@@ -5,7 +5,7 @@ NoneBot2 群友语录插件
 - 命令：/群友列表
 - 命令：/上传 <群友昵称> [图片]
 - 命令：/截图上传 <群友昵称> [引用消息]
-- 命令：/查看 <群友昵称>
+- 命令：/查看 <群友昵称>（以合并转发发送该群友全部语录，格式「ID」【对应截图】）
 - 命令：/随机群友 [昵称]（等概率随机一个有语录的群友再随机一条；指定昵称则从该群友语录中随机）
 - 命令：/随机语录（从本群全部语录中随机抽取一条）
 - 命令：/随机精华（从群精华消息中随机抽一条，格式：昵称：内容）
@@ -528,11 +528,28 @@ async def handle_screenshot_upload(
     await screenshot_upload_cmd.finish(msg)
 
 
+def _message_to_content(msg: Message) -> list[dict]:
+    """Message 转为 OneBot API 可序列化的 content 格式"""
+    result = []
+    for seg in msg:
+        data = {k: v for k, v in seg.data.items() if v is not None}
+        result.append({"type": seg.type, "data": data})
+    return result
+
+
+def _make_forward_node(name: str, uin: str, content: Message) -> dict:
+    """构建合并转发节点"""
+    return {
+        "type": "node",
+        "data": {"name": name, "uin": uin, "content": _message_to_content(content)},
+    }
+
+
 @view_cmd.handle()
 async def handle_view(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /查看 命令"""
+    """处理 /查看 命令：以合并转发形式发送该群友的全部语录，格式为「ID」【对应截图】"""
     name = args.extract_plain_text().strip()
     if not name:
         await view_cmd.finish("请输入群友昵称，例如：/查看 小明")
@@ -545,27 +562,55 @@ async def handle_view(
             f"群友「{name}」不存在，请先使用 /新增群友 {name} 添加"
         )
 
-    image_dir = _get_member_image_dir(group_id, canonical)
-    if not image_dir.exists():
+    index = _load_index(group_id)
+    member_entries = [
+        (short_id, entry)
+        for short_id, entry in index.items()
+        if entry.get("member") == canonical
+    ]
+    if not member_entries:
         await view_cmd.finish(
             f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
         )
 
-    image_files = list(image_dir.glob("*.*"))
-    if not image_files:
+    try:
+        bot_info = await bot.get_login_info()
+        bot_name = bot_info.get("nickname", "YiyinBot")
+        bot_uin = str(bot.self_id)
+    except Exception:
+        bot_name = "YiyinBot"
+        bot_uin = str(bot.self_id)
+
+    nodes = []
+    images_dir = _get_group_dir(group_id) / "images" / canonical
+    for short_id, entry in member_entries:
+        filename = entry.get("filename")
+        if not filename:
+            continue
+        filepath = images_dir / filename
+        if not filepath.exists():
+            continue
+        try:
+            image_bytes = filepath.read_bytes()
+        except Exception:
+            logger.exception(f"读取语录图片失败: {filepath}")
+            continue
+        content = Message(
+            MessageSegment.text(f"「{short_id}」【对应截图】\n")
+        ) + MessageSegment.image(image_bytes)
+        nodes.append(_make_forward_node(bot_name, bot_uin, content))
+
+    if not nodes:
         await view_cmd.finish(
             f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
         )
 
-    chosen = random.choice(image_files)
-    image_bytes = chosen.read_bytes()
-
-    short_id = _find_id_by_filepath(group_id, canonical, chosen.name)
-    id_hint = f"（ID：{short_id}）" if short_id else ""
-    msg = MessageSegment.text(
-        f"群友「{canonical}」的语录{id_hint}：\n"
-    ) + MessageSegment.image(image_bytes)
-    await view_cmd.finish(msg)
+    # 单条合并转发最多 200 节点，超出则分段发送
+    chunk_size = 200
+    for i in range(0, len(nodes), chunk_size):
+        chunk = nodes[i : i + chunk_size]
+        await bot.send_group_forward_msg(group_id=event.group_id, messages=chunk)
+    await view_cmd.finish()
 
 
 @random_member_cmd.handle()

@@ -56,14 +56,18 @@ MODE="$1"
 REMOTE="$(get_remote "$MODE" "$2")"
 [[ -z "$REMOTE" ]] && { echo "错误: 未指定远程。请传入 user@host:path 或配置默认远程。" >&2; usage; }
 
+# 使用 --no-owner --no-group 避免远程无 root 权限时 chgrp/chown 失败
+# 见: rsync 在非 root 下保留权限会报 "chgrp failed: Operation not permitted"
+RSYNC_OPTS="-avz --delete --no-owner --no-group"
+
 case "$MODE" in
   push)
     echo "正在将 data/ 同步到 $REMOTE ..."
-    rsync -avz --delete "$DATA_DIR/" "$REMOTE/data/"
+    rsync $RSYNC_OPTS "$DATA_DIR/" "$REMOTE/data/"
     ;;
   pull)
     echo "正在从 $REMOTE 拉取 data/ ..."
-    rsync -avz --delete "$REMOTE/data/" "$DATA_DIR/"
+    rsync $RSYNC_OPTS "$REMOTE/data/" "$DATA_DIR/"
     ;;
   diff)
     echo "本地 -> 远程 差异预览 (不会实际传输):"

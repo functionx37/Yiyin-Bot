@@ -124,7 +124,7 @@ def _build_quote_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]
         except Exception as e:
             logger.debug(f"群刊读取语录图片失败 {filepath}: {e}")
             continue
-        content = Message(MessageSegment.text(f"『{member}』：")) + MessageSegment.image(img_bytes)
+        content = Message(MessageSegment.text(f"「{member}」：")) + MessageSegment.image(img_bytes)
         nodes.append(_make_node(bot_name, bot_uin, content))
     return nodes
 
@@ -147,7 +147,7 @@ def _build_food_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]:
         except Exception as e:
             logger.debug(f"群刊读取食物图片失败 {filepath}: {e}")
             continue
-        content = Message(MessageSegment.text(f"『{display}』：\n")) + MessageSegment.image(img_bytes)
+        content = Message(MessageSegment.text(f"「{display}」：\n")) + MessageSegment.image(img_bytes)
         nodes.append(_make_node(bot_name, bot_uin, content))
     return nodes
 

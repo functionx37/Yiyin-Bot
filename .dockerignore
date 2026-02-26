@@ -7,6 +7,7 @@ __pycache__
 .env.*
 napcat/
 data/
+.local/
 .gitignore
 .dockerignore
 Dockerfile

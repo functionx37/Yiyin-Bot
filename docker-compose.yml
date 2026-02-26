@@ -4,9 +4,8 @@ services:
     container_name: yiyin-nonebot
     env_file: .env.prod
     volumes:
-      # 使用 ${PWD} 确保挂载项目根目录的 data，避免从其它目录启动时挂载到错误的空目录
-      - ${PWD}/data:/app/data
-      - ${PWD}/.local:/app/.local
+      - ./data:/app/data
+      - ./.local:/app/.local
     restart: unless-stopped
     networks:
       - bot-network

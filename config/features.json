@@ -11,7 +11,8 @@
         "nonebot_plugin_emojimix": "Emoji合成",
         "nonebot_plugin_anime_trace": "动漫识别",
         "emoji_reaction": "贴表情",
-        "food": "食物图鉴"
+        "food": "食物图鉴",
+        "apology_withdraw": "道歉撤回"
     },
     "optin": {
         "nonebot_plugin_fakemsg": "伪造消息"

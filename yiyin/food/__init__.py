@@ -107,6 +107,21 @@ async def _extract_images(
     return images
 
 
+def delete_food(group_id: str, food_id: str) -> bool:
+    """删除指定食物记录，供其他插件调用。成功返回 True，不存在返回 False。"""
+    index = _load_index(group_id)
+    if food_id not in index:
+        return False
+    entry = index[food_id]
+    fn = entry.get("filename") or f"{food_id}.png"
+    filepath = _get_images_dir(group_id) / fn
+    if filepath.exists():
+        filepath.unlink()
+    del index[food_id]
+    _save_index(group_id, index)
+    return True
+
+
 def _format_food_label(short_id: str, name: str | None) -> str:
     """有名字：『name』（id）；无名字：『id』"""
     if name and name.strip():

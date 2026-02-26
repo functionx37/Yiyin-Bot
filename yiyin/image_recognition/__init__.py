@@ -125,14 +125,16 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
 
     rec_type, name = _parse_llm_response(reply)
 
+    reply_seg = MessageSegment.reply(event.message_id)
+
     if rec_type == "BEAUTY":
         lines = _load_sao_lines()
         if lines:
             msg = random.choice(lines)
-            await bot.send(event, msg)
+            await bot.send(event, reply_seg + MessageSegment.text(msg))
 
     elif rec_type == "FOOD":
         result = await add_food_from_image_url(group_id, image_url, name)
         if result:
             hint = "名称仅供参考，可使用 /补充名字 <id> <名字> 调整"
-            await bot.send(event, f"{result}\n{hint}")
+            await bot.send(event, reply_seg + MessageSegment.text(f"{result}\n{hint}"))

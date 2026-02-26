@@ -114,6 +114,38 @@ def _format_food_label(short_id: str, name: str | None) -> str:
     return f"『{short_id}』"
 
 
+async def add_food_from_image_url(
+    group_id: str, image_url: str, name: str | None
+) -> str | None:
+    """从图片 URL 保存食物到图鉴，供其他插件调用。成功返回提示消息，失败返回 None。"""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            resp = await client.get(image_url)
+            resp.raise_for_status()
+            content = resp.content
+    except Exception:
+        logger.exception(f"下载食物图片失败: {image_url}")
+        return None
+
+    index = _load_index(group_id)
+    existing_ids = set(index.keys())
+    short_id = _generate_short_id(existing_ids)
+    images_dir = _get_images_dir(group_id)
+    images_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        filepath = images_dir / f"{short_id}.png"
+        filepath.write_bytes(content)
+        index[short_id] = {"name": name}
+        _save_index(group_id, index)
+    except Exception:
+        logger.exception("保存食物文件失败")
+        filepath.unlink(missing_ok=True)
+        return None
+
+    name_hint = f"「{name}」" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
+    return f"已保存 1 张食物图✓ {name_hint}\n食物ID：{short_id}"
+
+
 # ==================== 注册命令 ====================
 collect_food_cmd = on_command("收集食物", priority=10, block=True)
 delete_food_cmd = on_command(

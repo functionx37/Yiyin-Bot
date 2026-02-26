@@ -65,8 +65,8 @@ apology_matcher = on_message(
 @apology_matcher.handle()
 async def handle_apology_withdraw(bot: Bot, event: GroupMessageEvent):
     """管理引用 bot 消息并说不行时：道歉并撤回 bot 的消息；若为食物添加消息则删除记录"""
-    # 仅当引用的消息来自 bot 时处理
-    if event.reply.sender.user_id != bot.self_id:
+    # 仅当引用的消息来自 bot 时处理（类型可能为 int/str，统一转 str 比较）
+    if str(event.reply.sender.user_id) != str(bot.self_id):
         return
 
     bot_msg_id = event.reply.message_id

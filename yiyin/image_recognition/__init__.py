@@ -23,7 +23,7 @@ from yiyin.food import add_food_from_image_url
 # ==================== 配置 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SAO_JSON = PROJECT_ROOT / "assets" / "documents" / "sao.json"
-IMAGE_RECOG_MODEL = "gemini-2.5-flash"
+IMAGE_RECOG_MODEL = "gpt-4o"
 LOG_DIR = PROJECT_ROOT / "data" / "image_recognition"
 LOG_FILE = LOG_DIR / "recognition.jsonl"
 

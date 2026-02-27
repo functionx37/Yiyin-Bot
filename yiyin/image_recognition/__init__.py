@@ -8,17 +8,20 @@ NoneBot2 图片识别插件（隐藏功能，需 /启用 图片识别）
 import asyncio
 import json
 import random
+import tempfile
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 from nonebot import on_message
 from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
 
-from yiyin.llmapi import chat_completion
 from yiyin.food import add_food_from_image_url
+from yiyin.llmapi import chat_completion
+from yiyin.toggle import is_feature_enabled
 
 # ==================== 配置 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -84,6 +87,52 @@ def _has_image_no_face(event: GroupMessageEvent) -> bool:
     return any(seg.type == "image" for seg in event.message)
 
 
+async def _image_recognition_enabled(event: GroupMessageEvent) -> bool:
+    """本群已启用图片识别功能"""
+    return is_feature_enabled("image_recognition", str(event.group_id))
+
+
+# GIF 文件头魔数
+_GIF_MAGIC = (b"GIF87a", b"GIF89a")
+
+
+async def _is_gif_by_download(url: str) -> bool:
+    """下载图片到临时目录，检查后缀名或文件魔数是否为 GIF"""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            return False
+        with tempfile.TemporaryDirectory(prefix="image_recog_") as tmpdir:
+            # 根据 Content-Disposition 或 URL 确定后缀名
+            suffix = ".bin"
+            disp = resp.headers.get("content-disposition", "")
+            if "filename=" in disp.lower():
+                for part in disp.split(";"):
+                    if "filename=" in part.lower():
+                        name = part.split("=", 1)[1].strip(" \"'")
+                        if "." in name:
+                            suffix = "." + name.rsplit(".", 1)[1].lower()
+                        break
+            elif ".gif" in url.lower():
+                suffix = ".gif"
+            tmp_path = Path(tmpdir) / f"img{suffix}"
+            tmp_path.write_bytes(resp.content)
+            if suffix == ".gif":
+                return True
+            # 后缀不明时从临时文件读取前 6 字节检查 GIF 魔数
+            header = tmp_path.read_bytes()[:6]
+            if len(header) >= 6 and header in _GIF_MAGIC:
+                return True
+            ct = (resp.headers.get("content-type") or "").lower()
+            if "gif" in ct:
+                return True
+        return False
+    except Exception:
+        logger.debug("图片下载检测 GIF 失败: %s", url[:80])
+        return False  # 失败时按非 GIF 处理，避免漏识别
+
+
 def _extract_image_urls(event: GroupMessageEvent) -> list[str]:
     """提取消息中所有图片的 URL（仅 type=image）"""
     urls: list[str] = []
@@ -126,7 +175,7 @@ def _parse_llm_response(text: str) -> tuple[str, str | None]:
 
 # ==================== 注册 ====================
 image_recognition_matcher = on_message(
-    Rule(_has_image_no_face),
+    Rule(_has_image_no_face, _image_recognition_enabled),
     priority=60,
     block=False,
 )
@@ -134,7 +183,7 @@ image_recognition_matcher = on_message(
 
 @image_recognition_matcher.handle()
 async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
-    """对群内图片消息进行识别并响应（仅当群已启用图片识别时，由 toggle 预处理器放行）"""
+    """对群内图片消息进行识别并响应（Rule 已校验本群已启用图片识别）"""
     group_id = str(event.group_id)
     urls = _extract_image_urls(event)
     if not urls:
@@ -142,6 +191,9 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
 
     # 每条消息只处理第一张图片（避免刷屏）
     image_url = urls[0]
+
+    if await _is_gif_by_download(image_url):
+        return  # GIF 动图不参与识别
 
     if not await _claim_image_for_recognition(image_url):
         return  # 该图已识别过，跳过
@@ -171,15 +223,21 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
         _append_recognition_log(image_url, llm_ok=False, llm_error=llm_error, llm_reply=None)
         return
 
+    if not reply:
+        _append_recognition_log(
+            image_url,
+            llm_ok=False,
+            llm_error="API 未返回有效内容（可能是 YUNWU_API_KEY 未配置或请求失败）",
+            llm_reply=None,
+        )
+        return
+
     _append_recognition_log(
         image_url,
         llm_ok=True,
         llm_error=None,
-        llm_reply=reply if reply else None,
+        llm_reply=reply,
     )
-
-    if not reply:
-        return
 
     rec_type, name = _parse_llm_response(reply)
 

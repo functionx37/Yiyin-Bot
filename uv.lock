@@ -2537,6 +2537,7 @@ dependencies = [
     { name = "nonebot2", extra = ["fastapi", "httpx", "websockets"] },
     { name = "pillow" },
     { name = "pilmoji" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -2551,6 +2552,7 @@ requires-dist = [
     { name = "nonebot2", extras = ["fastapi", "httpx", "websockets"], specifier = ">=2.4.4" },
     { name = "pillow", specifier = ">=12.1.1" },
     { name = "pilmoji", specifier = ">=2.0.4" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
 
 [[package]]

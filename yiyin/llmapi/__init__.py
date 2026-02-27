@@ -9,12 +9,41 @@
 """
 
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
 
-YUNWU_API_KEY: str = os.environ.get("YUNWU_API_KEY", "")
-YUNWU_BASE_URL: str = os.environ.get("YUNWU_BASE_URL", "https://yunwu.ai/v1")
+from nonebot.log import logger
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_DOTENV_LOADED = False
+
+
+def _get_api_key() -> str:
+    """获取 YUNWU_API_KEY，若为空则尝试加载 .env.prod 后重试（解决 nb run 子进程可能未读到的情况）"""
+    global _DOTENV_LOADED
+    key = os.environ.get("YUNWU_API_KEY", "")
+    if not key and not _DOTENV_LOADED:
+        try:
+            from dotenv import load_dotenv
+            for f in (".env.prod", ".env"):
+                p = _PROJECT_ROOT / f
+                if p.exists():
+                    load_dotenv(p)
+                    _DOTENV_LOADED = True
+                    key = os.environ.get("YUNWU_API_KEY", "")
+                    if key:
+                        logger.info("llmapi: 已从 %s 加载 YUNWU_API_KEY", f)
+                    break
+        except ImportError:
+            pass
+        _DOTENV_LOADED = True
+    return key
+
+
+def _get_base_url() -> str:
+    return os.environ.get("YUNWU_BASE_URL", "https://yunwu.ai/v1")
 
 
 def _extract_text_from_content(content: Any) -> str | None:
@@ -61,7 +90,9 @@ async def chat_completion(
     Returns:
         助手回复文本，失败时返回 None
     """
-    if not YUNWU_API_KEY:
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("YUNWU_API_KEY 未配置，跳过 LLM 请求。请在 .env.prod 中设置 YUNWU_API_KEY")
         return None
 
     payload: dict[str, Any] = {
@@ -75,32 +106,45 @@ async def chat_completion(
     }
 
     headers = {
-        "Authorization": f"Bearer {YUNWU_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
-                f"{YUNWU_BASE_URL}/chat/completions",
+                f"{_get_base_url()}/chat/completions",
                 json=payload,
                 headers=headers,
             )
 
         if resp.status_code != 200:
+            logger.warning("chat_completion 非 200: status=%s body=%s", resp.status_code, resp.text[:200])
             return None
 
         data = resp.json()
         choices = data.get("choices", [])
         if not choices:
+            logger.warning("chat_completion choices 为空: %s", {k: v for k, v in data.items() if k != "usage"})
             return None
 
-        content = choices[0].get("message", {}).get("content")
-        return _extract_text_from_content(content) or (
+        first = choices[0]
+        msg = first.get("message", {})
+        content = msg.get("content")
+        result = _extract_text_from_content(content) or (
             content if isinstance(content, str) else None
         )
+        if result is None:
+            logger.warning(
+                "chat_completion 成功但 content 为空: finish_reason=%s, content_type=%s, content=%s",
+                first.get("finish_reason"),
+                type(content).__name__,
+                repr(content)[:100] if content is not None else None,
+            )
+        return result
 
-    except (httpx.TimeoutException, httpx.HTTPError, KeyError):
+    except (httpx.TimeoutException, httpx.HTTPError, KeyError) as e:
+        logger.warning("chat_completion 异常: %s: %s", type(e).__name__, e)
         return None
 
 

@@ -214,5 +214,14 @@
                 "description": "生成假聊天记录"
             }
         ]
+    },
+    {
+        "module": "撤回",
+        "function": [
+            {
+                "command": "[引用Bot的话]不行",
+                "description": "撤回对应消息并道歉"
+            }
+        ]
     }
 ]

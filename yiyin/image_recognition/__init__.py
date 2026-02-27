@@ -9,6 +9,7 @@ import asyncio
 import json
 import random
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 from nonebot import on_message
@@ -23,6 +24,8 @@ from yiyin.food import add_food_from_image_url
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 SAO_JSON = PROJECT_ROOT / "assets" / "documents" / "sao.json"
 IMAGE_RECOG_MODEL = "gemini-2.5-flash"
+LOG_DIR = PROJECT_ROOT / "data" / "image_recognition"
+LOG_FILE = LOG_DIR / "recognition.jsonl"
 
 # LLM 输出格式：BEAUTY | FOOD:简短名称 | OTHER
 BEAUTY_PROMPT = """你是一个严格的图片分类器。只看图片内容，按以下规则回复，且只回复一行，不要有任何其他文字。
@@ -40,6 +43,25 @@ _RECOG_CACHE: set[str] = set()
 _RECOG_CACHE_ORDER: deque[str] = deque()
 _RECOG_CACHE_MAX = 500
 _recog_cache_lock = asyncio.Lock()
+
+
+def _append_recognition_log(
+    image_url: str,
+    llm_ok: bool,
+    llm_error: str | None,
+    llm_reply: str | None,
+) -> None:
+    """追加一条图片识别日志到 data/image_recognition/recognition.jsonl"""
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "image_url": image_url,
+        "llm_success": llm_ok,
+        "llm_error": llm_error,
+        "llm_reply": llm_reply,
+    }
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 async def _claim_image_for_recognition(url: str) -> bool:
@@ -133,6 +155,8 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
             ],
         }
     ]
+    reply: str | None = None
+    llm_error: str | None = None
     try:
         reply = await chat_completion(
             messages,
@@ -141,9 +165,18 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
             max_tokens=64,
             timeout=25,
         )
-    except Exception:
+    except Exception as e:
+        llm_error = f"{type(e).__name__}: {e}"
         logger.exception("图片识别 LLM 调用失败")
+        _append_recognition_log(image_url, llm_ok=False, llm_error=llm_error, llm_reply=None)
         return
+
+    _append_recognition_log(
+        image_url,
+        llm_ok=True,
+        llm_error=None,
+        llm_reply=reply if reply else None,
+    )
 
     if not reply:
         return

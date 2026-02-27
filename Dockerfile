@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv 包管理器
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# 安装 uv 包管理器（用 pip+国内镜像，避免慢速拉取 ghcr.io）
+RUN pip install --no-cache-dir uv -i https://mirrors.aliyun.com/pypi/simple/
 
 WORKDIR /app
 

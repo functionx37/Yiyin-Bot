@@ -17,6 +17,8 @@ from nonebot.adapters.onebot.v11 import (
     MessageSegment,
 )
 
+from yiyin.utils import image_segment_from_path
+
 # ==================== 常量与路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -120,6 +122,7 @@ def _load_deleted_members(group_id: str) -> set:
 
 
 def _build_quote_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]:
+    """构建语录节点，使用本地文件路径，不加载图片到内存。"""
     index = _load_quotes_index(group_id)
     deleted = _load_deleted_members(group_id)
     images_dir = QUOTES_DIR / group_id / "images"
@@ -133,16 +136,17 @@ def _build_quote_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]
         if not filepath.exists():
             continue
         try:
-            img_bytes = filepath.read_bytes()
+            img_seg = image_segment_from_path(filepath)
         except Exception as e:
-            logger.debug(f"群刊读取语录图片失败 {filepath}: {e}")
+            logger.debug(f"群刊语录图片路径失败 {filepath}: {e}")
             continue
-        content = Message(MessageSegment.text(f"「{member}」：")) + MessageSegment.image(img_bytes)
+        content = Message(MessageSegment.text(f"「{member}」：")) + img_seg
         nodes.append(_make_node(bot_name, bot_uin, content))
     return nodes
 
 
 def _build_food_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]:
+    """构建食物节点，使用本地文件路径，不加载图片到内存。"""
     index = _load_food_index(group_id)
     images_dir = FOOD_DIR / group_id / "images"
     nodes = []
@@ -154,11 +158,11 @@ def _build_food_nodes(group_id: str, bot_name: str, bot_uin: str) -> list[dict]:
         if not filepath.exists():
             continue
         try:
-            img_bytes = filepath.read_bytes()
+            img_seg = image_segment_from_path(filepath)
         except Exception as e:
-            logger.debug(f"群刊读取食物图片失败 {filepath}: {e}")
+            logger.debug(f"群刊食物图片路径失败 {filepath}: {e}")
             continue
-        content = Message(MessageSegment.text(f"「{display}」：\n")) + MessageSegment.image(img_bytes)
+        content = Message(MessageSegment.text(f"「{display}」：\n")) + img_seg
         nodes.append(_make_node(bot_name, bot_uin, content))
     return nodes
 
@@ -192,18 +196,14 @@ async def handle_magazine(bot: Bot, event: GroupMessageEvent):
         await bot.send(event, "本群暂无语录与食物记录，无法生成群刊。")
         return
 
-    # 嵌套结构：外层 [聊天记录] 含 4 项 — 标题(普通) / [语录聊天记录] / 标题(普通) / [食物聊天记录]
+    # 单条合并转发，结构与原先一致；使用本地文件路径，由 NapCat 读取，不占内存
     nodes: list[dict] = []
     if quote_nodes:
-        nodes.append(
-            _make_node(bot_name, bot_uin, Message(MessageSegment.text("📖 群友语录")))
-        )
-        nodes.append(_make_node("群友语录", bot_uin, quote_nodes))  # 嵌套，name 控制外层预览
+        nodes.append(_make_node(bot_name, bot_uin, Message(MessageSegment.text("📖 群友语录"))))
+        nodes.append(_make_node("群友语录", bot_uin, quote_nodes))
     if food_nodes:
-        nodes.append(
-            _make_node(bot_name, bot_uin, Message(MessageSegment.text("🍽️ 食物图鉴")))
-        )
-        nodes.append(_make_node("食物图鉴", bot_uin, food_nodes))  # 嵌套，name 控制外层预览
+        nodes.append(_make_node(bot_name, bot_uin, Message(MessageSegment.text("🍽️ 食物图鉴"))))
+        nodes.append(_make_node("食物图鉴", bot_uin, food_nodes))
 
     try:
         await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)

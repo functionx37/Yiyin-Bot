@@ -35,9 +35,10 @@ BEAUTY_PROMPT = """你是一个严格的图片分类器。只看图片内容，�
 只输出 BEAUTY、FOOD:xxx 或 OTHER 之一，不要解释。"""
 
 # 图片 URL 去重：同一张图只请求识别一次（LRU 缓存，防止重复转发刷 API）
+# 小内存服务器建议降低此值（如 500），减少内存占用
 _RECOG_CACHE: set[str] = set()
 _RECOG_CACHE_ORDER: deque[str] = deque()
-_RECOG_CACHE_MAX = 2000
+_RECOG_CACHE_MAX = 500
 _recog_cache_lock = asyncio.Lock()
 
 

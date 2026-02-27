@@ -26,6 +26,8 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, Message
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
+from yiyin.utils import image_segment_from_path
+
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "quotes"
@@ -684,21 +686,22 @@ async def handle_view(
         bot_name = "YiyinBot"
         bot_uin = str(bot.self_id)
 
-    nodes = []
+    # 使用本地文件路径构建节点，不加载图片到内存；单条合并转发最多 200 节点
     images_dir = _get_group_dir(group_id) / "images" / canonical
+    nodes = []
     for short_id, entry in member_entries:
         fn = entry.get("filename") or f"{short_id}.png"
         filepath = images_dir / fn
         if not filepath.exists():
             continue
         try:
-            image_bytes = filepath.read_bytes()
+            img_seg = image_segment_from_path(filepath)
         except Exception:
             logger.exception(f"读取语录图片失败: {filepath}")
             continue
         content = Message(
             MessageSegment.text(f"「{short_id}」【对应截图】\n")
-        ) + MessageSegment.image(image_bytes)
+        ) + img_seg
         nodes.append(_make_forward_node(bot_name, bot_uin, content))
 
     if not nodes:
@@ -706,7 +709,6 @@ async def handle_view(
             f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
         )
 
-    # 单条合并转发最多 200 节点，超出则分段发送
     chunk_size = 200
     for i in range(0, len(nodes), chunk_size):
         chunk = nodes[i : i + chunk_size]

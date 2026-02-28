@@ -49,7 +49,7 @@ _RECOG_CACHE_MAX = 500
 _recog_cache_lock = asyncio.Lock()
 
 # 识别冷却时间（秒），避免频繁调用 API
-_RECOG_COOLDOWN_SEC = 5
+_RECOG_COOLDOWN_SEC = 60
 _last_recog_time: float = 0
 _recog_cooldown_lock = asyncio.Lock()
 

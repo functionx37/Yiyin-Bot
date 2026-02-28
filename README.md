@@ -33,6 +33,8 @@ docker compose up -d --build
 ## 数据同步  
 项目提供 `scripts/sync-data.sh`，可在 `.env.prod` 中配置默认远程，也可以用参数传递，需要 SSH 能登录。
 
+请注意，脚本为镜像同步，目标端会被覆盖。
+
 ```bash
 # 把本机推到远程
 ./scripts/sync-data.sh push

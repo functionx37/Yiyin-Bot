@@ -219,7 +219,7 @@
         "module": "撤回",
         "function": [
             {
-                "command": "[引用Bot的话]不行",
+                "command": "超级管理员对Bot消息贴id100表情（糗大了）",
                 "description": "撤回对应消息并道歉"
             }
         ]

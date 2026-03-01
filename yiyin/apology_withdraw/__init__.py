@@ -1,32 +1,55 @@
 """
 NoneBot2 道歉撤回插件
-- 当管理/群主/超级管理员引用 bot 的消息并说「不行」时，bot 发一句道歉并撤回被引用的消息
+- 当超级管理员对 bot 的消息贴上 id 100 的表情（糗大了）时，bot 发一句道歉并撤回该消息
 - 若撤回的是图片识别的食物添加消息，会同步删除对应食物记录并通知
+- 依赖 NapCat 等协议端上报 msg_emoji_like 通知事件
 """
 
 import re
+from typing import Literal, Optional
 
-from nonebot import on_message
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
+from nonebot import on_notice
+from nonebot.adapters.onebot.v11 import Bot, Message
+from nonebot.adapters.onebot.v11.event import NoticeEvent
 from nonebot.log import logger
 from nonebot.permission import SUPERUSER
 from nonebot.rule import Rule
 
-from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
-
 from yiyin.food import delete_food
+
+# ==================== 自定义事件模型 ====================
+# NapCat 等协议端可能上报 msg_emoji_like 通知（消息被贴表情）
+# 若协议端不支持，此功能不会触发
+
+
+class MsgEmojiLikeNoticeEvent(NoticeEvent):
+    """消息被贴表情通知事件（扩展）"""
+
+    notice_type: Literal["msg_emoji_like"]
+    user_id: int  # 贴表情的用户
+    message_id: int  # 被贴表情的消息 ID
+    emoji_id: str  # 表情 ID
+    group_id: Optional[int] = None  # 群号（群消息时有）
+
+    def get_user_id(self) -> str:
+        return str(self.user_id)
+
+    def get_session_id(self) -> str:
+        if self.group_id:
+            return f"group_{self.group_id}_{self.user_id}"
+        return str(self.user_id)
+
+
+# 注册自定义事件模型，使适配器能正确解析
+from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
+
+OneBotV11Adapter.add_custom_model(MsgEmojiLikeNoticeEvent)
 
 # ==================== 规则 ====================
 
+_APOLOGY_EMOJI_ID = "100"  # 糗大了
+
 _FOOD_ID_RE = re.compile(r"食物ID[：:]\s*([A-Za-z0-9]+)")
-
-
-def _has_reply_and_no(event: GroupMessageEvent) -> bool:
-    """有引用消息且正文为「不行」"""
-    if not event.reply:
-        return False
-    text = event.message.extract_plain_text().strip()
-    return text == "不行"
 
 
 async def _extract_recalled_text(bot: Bot, message_id: int) -> str:
@@ -53,24 +76,41 @@ def _parse_food_id(text: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _is_msg_emoji_like(event: NoticeEvent) -> bool:
+    """是否为消息被贴表情通知"""
+    return isinstance(event, MsgEmojiLikeNoticeEvent)
+
+
 # ==================== 注册 ====================
-apology_matcher = on_message(
-    Rule(_has_reply_and_no),
-    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
+apology_matcher = on_notice(
+    Rule(_is_msg_emoji_like),
     priority=5,
     block=True,
+    permission=SUPERUSER,
 )
 
 
 @apology_matcher.handle()
-async def handle_apology_withdraw(bot: Bot, event: GroupMessageEvent):
-    """管理引用 bot 消息并说不行时：道歉并撤回 bot 的消息；若为食物添加消息则删除记录"""
-    # 仅当引用的消息来自 bot 时处理（类型可能为 int/str，统一转 str 比较）
-    if str(event.reply.sender.user_id) != str(bot.self_id):
+async def handle_apology_withdraw(bot: Bot, event: MsgEmojiLikeNoticeEvent):
+    """超级管理员对 bot 消息贴 id100 表情（糗大了）时：道歉并撤回该消息"""
+    # 仅处理表情 id 100（糗大了）
+    if event.emoji_id != _APOLOGY_EMOJI_ID:
+        return
+    # 仅处理群消息（需 group_id 用于 delete_food 和 send）
+    if not event.group_id:
         return
 
-    bot_msg_id = event.reply.message_id
+    bot_msg_id = event.message_id
     group_id = str(event.group_id)
+
+    # 确认被贴表情的消息来自 bot
+    try:
+        msg_data = await bot.get_msg(message_id=bot_msg_id)
+        sender_id = msg_data.get("sender", {}).get("user_id")
+        if str(sender_id) != str(bot.self_id):
+            return
+    except Exception:
+        return
 
     # 若为图片识别的食物添加消息，先删除对应食物记录
     deleted_food_id: str | None = None
@@ -81,9 +121,12 @@ async def handle_apology_withdraw(bot: Bot, event: GroupMessageEvent):
             deleted_food_id = food_id
 
     try:
-        await bot.send(event, "果咩纳塞！")
+        await bot.send_group_msg(group_id=event.group_id, message="果咩纳塞！")
         await bot.call_api("delete_msg", message_id=bot_msg_id)
         if deleted_food_id:
-            await bot.send(event, f"已删除对应食物记录（ID：{deleted_food_id}）")
+            await bot.send_group_msg(
+                group_id=event.group_id,
+                message=f"已删除对应食物记录（ID：{deleted_food_id}）",
+            )
     except Exception as e:
         logger.warning(f"道歉撤回失败: {e}")

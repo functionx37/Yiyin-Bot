@@ -214,14 +214,5 @@
                 "description": "生成假聊天记录"
             }
         ]
-    },
-    {
-        "module": "撤回",
-        "function": [
-            {
-                "command": "超级管理员对Bot消息贴id100表情（糗大了）",
-                "description": "撤回对应消息并道歉"
-            }
-        ]
     }
 ]

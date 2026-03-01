@@ -3,10 +3,12 @@ NoneBot2 食物图鉴插件（按群隔离）
 - 命令：/收集食物 [名字] [图片] — 保存食物图片，支持引用图片，可选名字
 - 命令：/删除食物 <id> — 仅超级管理员
 - 命令：/补充名字 <id> <name>
+- 命令：/隐藏 <id> — 将普通食物设为隐藏食物
 - 命令：/吃大餐 [数量] — 默认三道菜，最多十道
-- 触发：有人发「吃什么」时回复「是啊，吃什么」并随机一张图请你吃
+- 触发：有人发「吃什么」时回复「是啊，吃什么」并随机一张图请你吃（单抽有概率触发隐藏食物）
 """
 
+import asyncio
 import json
 import random
 import string
@@ -35,6 +37,30 @@ def _get_index_file(group_id: str) -> Path:
 
 def _get_images_dir(group_id: str) -> Path:
     return _get_group_dir(group_id) / "images"
+
+
+def _get_hidden_prob_file(group_id: str) -> Path:
+    return _get_group_dir(group_id) / "hidden_prob.json"
+
+
+def _load_hidden_prob(group_id: str) -> int:
+    """加载隐藏食物触发概率（1-100），默认 3"""
+    f = _get_hidden_prob_file(group_id)
+    if not f.exists():
+        return 3
+    try:
+        with open(f, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+            return max(1, min(100, int(data.get("prob", 3))))
+    except Exception:
+        return 3
+
+
+def _save_hidden_prob(group_id: str, prob: int) -> None:
+    f = _get_hidden_prob_file(group_id)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    with open(f, "w", encoding="utf-8") as fp:
+        json.dump({"prob": prob}, fp, ensure_ascii=False)
 
 
 def _generate_short_id(existing_ids: set[str]) -> str:
@@ -167,6 +193,7 @@ delete_food_cmd = on_command(
     "删除食物", priority=10, block=True, permission=SUPERUSER
 )
 supplement_name_cmd = on_command("补充名字", priority=10, block=True)
+hidden_food_cmd = on_command("隐藏", priority=10, block=True)
 feast_cmd = on_command("吃大餐", priority=10, block=True)
 
 what_to_eat_matcher = on_keyword({"吃什么"}, priority=50, block=False)
@@ -284,6 +311,25 @@ async def handle_supplement_name(
     await supplement_name_cmd.finish(f"已为食物（ID：{food_id}）补充名字「{name}」✓")
 
 
+@hidden_food_cmd.handle()
+async def handle_hidden_food(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    """处理 /隐藏 <id>：将普通食物设为隐藏食物"""
+    food_id = args.extract_plain_text().strip()
+    if not food_id:
+        await hidden_food_cmd.finish("用法：/隐藏 <食物ID>，例如：/隐藏 Ab3x9K")
+
+    group_id = str(event.group_id)
+    index = _load_index(group_id)
+    if food_id not in index:
+        await hidden_food_cmd.finish(f"食物ID「{food_id}」不存在")
+
+    index[food_id]["hidden"] = True
+    _save_index(group_id, index)
+    await hidden_food_cmd.finish(f"已将食物（ID：{food_id}）设为隐藏食物✓")
+
+
 @feast_cmd.handle()
 async def handle_feast(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
@@ -303,7 +349,11 @@ async def handle_feast(
             "本群还没有收集任何食物，使用 /收集食物 [名字] [图片] 来添加吧"
         )
 
-    ids = list(index.keys())
+    ids = [sid for sid, e in index.items() if not e.get("hidden")]
+    if not ids:
+        await feast_cmd.finish(
+            "本群没有普通食物，吃大餐仅从普通食物中抽取（隐藏食物仅能从「吃什么」单抽获得）"
+        )
     if len(ids) < count:
         await feast_cmd.finish(
             f"本群目前只有 {len(ids)} 道菜，无法凑齐 {count} 道，试试 /吃大餐 {len(ids)}"
@@ -328,13 +378,60 @@ async def handle_feast(
 
 @what_to_eat_matcher.handle()
 async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
-    """检测「吃什么」：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]"""
+    """检测「吃什么」：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]；单抽有概率触发隐藏食物"""
     group_id = str(event.group_id)
     index = _load_index(group_id)
     if not index:
         return
 
-    ids = list(index.keys())
+    # 分离普通食物与隐藏食物
+    normal_ids = [sid for sid, e in index.items() if not e.get("hidden")]
+    hidden_ids = [sid for sid, e in index.items() if e.get("hidden")]
+
+    # 若有隐藏食物，按概率判定是否触发
+    triggered_hidden = False
+    if hidden_ids:
+        prob = _load_hidden_prob(group_id)
+        if random.randint(1, 100) <= prob:
+            triggered_hidden = True
+            _save_hidden_prob(group_id, 3)  # 抽中后概率重置为 3%
+        else:
+            _save_hidden_prob(group_id, min(100, prob + 1))  # 未中则 +1%
+
+    if triggered_hidden and hidden_ids:
+        # 从隐藏食物中抽取
+        short_id = random.choice(hidden_ids)
+        entry = index[short_id]
+        name = entry.get("name") or short_id
+        food_name = name.strip() if name and name.strip() else short_id
+        fn = entry.get("filename") or f"{short_id}.png"
+        filepath = _get_images_dir(group_id) / fn
+        if not filepath.exists():
+            return
+
+        await bot.send(event, "是啊，吃什么")
+        user_id = event.get_user_id()
+        text_msg = MessageSegment.text("恭喜") + MessageSegment.at(user_id) + MessageSegment.text(f"，请您享用{food_name}：")
+        await bot.send(event, text_msg)
+        img_resp = await bot.send(event, MessageSegment.image(filepath.read_bytes()))
+
+        async def _recall_image():
+            await asyncio.sleep(10)
+            try:
+                msg_id = None
+                if isinstance(img_resp, dict):
+                    msg_id = img_resp.get("message_id") or (img_resp.get("data") or {}).get("message_id")
+                if msg_id is not None:
+                    await bot.call_api("delete_msg", message_id=msg_id)
+            except Exception as e:
+                logger.warning(f"撤回隐藏食物图片失败: {e}")
+
+        asyncio.create_task(_recall_image())
+        await what_to_eat_matcher.finish()
+        return
+
+    # 普通抽取：从普通食物中选（若无普通食物则从全部中选）
+    ids = normal_ids if normal_ids else list(index.keys())
     short_id = random.choice(ids)
     entry = index[short_id]
     name = entry.get("name") or None

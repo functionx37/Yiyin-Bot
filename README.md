@@ -38,9 +38,8 @@ Python包依赖使用 **uv** 进行管理。
     ```
 5. 启动机器人
    ```bash
-   ./scripts/start.sh
+   uv run bot.py
    ```
-   一键后台启动 bot.py 和 napcat。停止：`./scripts/stop.sh`
 
 ## 功能列表
 [点击查看](assets/documents/help.json)

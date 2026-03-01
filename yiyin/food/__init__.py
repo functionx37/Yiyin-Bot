@@ -344,7 +344,7 @@ async def handle_feast(
         count = int(text) if text else 3
     except ValueError:
         count = 3
-    count = max(1, min(10, count))
+    count = max(1, min(7, count))
 
     index = _load_index(group_id)
     if not index:

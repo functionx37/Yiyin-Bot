@@ -1,7 +1,6 @@
 """Yiyin Bot - NoneBot2 QQ 机器人"""
 from pathlib import Path
 
-# 尽早加载环境变量：优先 .env.prod，其次 .env（Docker 下通常由 env_file 注入，此处兜底本地运行）
 try:
     from dotenv import load_dotenv
     root = Path(__file__).resolve().parent

@@ -5,27 +5,42 @@ Python包依赖使用 **uv** 进行管理。
 
 ## 部署步骤  
 
-1. 创建 `.env.prod` 配置  
+1. 安装 NapCat 和 uv
+    ```bash
+    curl -o \
+    napcat.sh \
+    https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh \
+    && bash napcat.sh
+    ```
+    ```bash
+    pipx install uv
+    uv sync
+    ```
+2. 克隆本仓库
+    ```bash
+    git clone https://github.com/functionx37/Yiyin-Bot.git Yiyin-Bot
+    cd Yiyin-Bot
+    ```
+3. 配置环境变量  
     ```bash
     cp .env.example .env.prod
     # 编辑 .env.prod，填入你的 ONEBOT_ACCESS_TOKEN 等
     ```
-2. 启动容器  
+4. 配置 NapCat
     ```bash
-    docker compose up -d --build
+        mkdir napcat
+        cd napcat
+        napcat
+        # 根据提示新建一个网络配置，添加一个 WebSocket 客户端（反向 WS）
+        # URL：`ws://nonebot:8080/onebot/v11/ws`
+        # Token：`.env.prod` 中设置的 `ONEBOT_ACCESS_TOKEN`
+        # 启用该配置，并根据提示扫码登录
     ```
-3. 登录 QQ
-    * 打开浏览器访问 `<your-IP>:6099/webui`
-    * 获取Token： `docker logs yiyin-napcat 2>&1 | grep -i token`
-    * 进入网络配置，添加一个 WebSocket 客户端（反向 WS）
-    * URL：`ws://nonebot:8080/onebot/v11/ws`
-    * Token：`.env.prod` 中设置的 `ONEBOT_ACCESS_TOKEN`
-
-## 更新插件
-```bash
-git pull
-docker compose up -d --build
-```
+5. 启动机器人
+   ```bash
+   ./scripts/start.sh
+   ```
+   一键后台启动 bot.py 和 napcat。停止：`./scripts/stop.sh`
 
 ## 功能列表
 [点击查看](assets/documents/help.json)

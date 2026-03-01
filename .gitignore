@@ -31,6 +31,8 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
+.yiyin-bot.pids
 
 # Bot runtime data
 data/

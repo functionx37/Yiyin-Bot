@@ -107,9 +107,18 @@ def _is_msg_emoji_like(event: NoticeEvent) -> bool:
     )
 
 
+def _is_apology_emoji(event: NoticeEvent) -> bool:
+    """是否为糗大了表情（id 100），仅此表情才触发道歉撤回"""
+    if not isinstance(
+        event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent)
+    ):
+        return False
+    return event.emoji_id == _APOLOGY_EMOJI_ID
+
+
 # ==================== 注册 ====================
 apology_matcher = on_notice(
-    Rule(_is_msg_emoji_like),
+    Rule(_is_msg_emoji_like, _is_apology_emoji),
     priority=5,
     block=True,
     permission=SUPERUSER,
@@ -122,10 +131,7 @@ async def handle_apology_withdraw(
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
     """超级管理员对 bot 消息贴 id100 表情（糗大了）时：道歉并撤回该消息"""
-    # 仅处理表情 id 100（糗大了）
-    if event.emoji_id != _APOLOGY_EMOJI_ID:
-        return
-    # 仅处理群消息（需 group_id 用于 delete_food 和 send）
+    # Rule 已保证 emoji_id==100；仅处理群消息（需 group_id 用于 delete_food 和 send）
     if not event.group_id:
         return
 

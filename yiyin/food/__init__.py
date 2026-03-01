@@ -20,6 +20,7 @@ from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
+from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -193,7 +194,9 @@ delete_food_cmd = on_command(
     "删除食物", priority=10, block=True, permission=SUPERUSER
 )
 supplement_name_cmd = on_command("补充名字", priority=10, block=True)
-hidden_food_cmd = on_command("隐藏", priority=10, block=True)
+hidden_food_cmd = on_command(
+    "隐藏", priority=10, block=True, permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER
+)
 feast_cmd = on_command("吃大餐", priority=10, block=True)
 
 what_to_eat_matcher = on_keyword({"吃什么"}, priority=50, block=False)

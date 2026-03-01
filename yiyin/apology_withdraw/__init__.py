@@ -2,11 +2,11 @@
 NoneBot2 道歉撤回插件
 - 当超级管理员对 bot 的消息贴上 id 100 的表情（糗大了）时，bot 发一句道歉并撤回该消息
 - 若撤回的是图片识别的食物添加消息，会同步删除对应食物记录并通知
-- 依赖 NapCat 等协议端上报 msg_emoji_like 通知事件
+- 依赖 NapCat 等协议端上报 msg_emoji_like / group_msg_emoji_like 通知事件
 """
 
 import re
-from typing import Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 from nonebot import on_notice
 from nonebot.adapters.onebot.v11 import Bot, Message
@@ -18,18 +18,18 @@ from nonebot.rule import Rule
 from yiyin.food import delete_food
 
 # ==================== 自定义事件模型 ====================
-# NapCat 等协议端可能上报 msg_emoji_like 通知（消息被贴表情）
-# 若协议端不支持，此功能不会触发
+# NapCat 上报 group_msg_emoji_like（群消息贴表情），结构为 likes: [{emoji_id, count}]
+# 部分协议端可能上报 msg_emoji_like（单 emoji_id 字段），两者都支持
 
 
 class MsgEmojiLikeNoticeEvent(NoticeEvent):
-    """消息被贴表情通知事件（扩展）"""
+    """消息被贴表情通知事件（msg_emoji_like，单 emoji_id 格式）"""
 
     notice_type: Literal["msg_emoji_like"]
-    user_id: int  # 贴表情的用户
-    message_id: int  # 被贴表情的消息 ID
-    emoji_id: str  # 表情 ID
-    group_id: Optional[int] = None  # 群号（群消息时有）
+    user_id: int
+    message_id: int
+    emoji_id: str
+    group_id: Optional[int] = None
 
     def get_user_id(self) -> str:
         return str(self.user_id)
@@ -40,10 +40,34 @@ class MsgEmojiLikeNoticeEvent(NoticeEvent):
         return str(self.user_id)
 
 
-# 注册自定义事件模型，使适配器能正确解析
+class GroupMsgEmojiLikeNoticeEvent(NoticeEvent):
+    """群消息贴表情通知事件（group_msg_emoji_like，NapCat 格式 likes 数组）"""
+
+    notice_type: Literal["group_msg_emoji_like"]
+    user_id: int
+    message_id: int
+    group_id: int
+    likes: list[dict[str, Any]]  # [{"emoji_id": "424", "count": 1}]
+    is_add: bool = True
+
+    @property
+    def emoji_id(self) -> str:
+        """从 likes 中取第一个表情 ID（贴表情时通常只有一个）"""
+        if self.likes and self.is_add:
+            return str(self.likes[0].get("emoji_id", ""))
+        return ""
+
+    def get_user_id(self) -> str:
+        return str(self.user_id)
+
+    def get_session_id(self) -> str:
+        return f"group_{self.group_id}_{self.user_id}"
+
+
+# 注册自定义事件模型
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
-OneBotV11Adapter.add_custom_model(MsgEmojiLikeNoticeEvent)
+OneBotV11Adapter.add_custom_model(MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent)
 
 # ==================== 规则 ====================
 
@@ -77,8 +101,10 @@ def _parse_food_id(text: str) -> str | None:
 
 
 def _is_msg_emoji_like(event: NoticeEvent) -> bool:
-    """是否为消息被贴表情通知"""
-    return isinstance(event, MsgEmojiLikeNoticeEvent)
+    """是否为消息被贴表情通知（含 msg_emoji_like 与 group_msg_emoji_like）"""
+    return isinstance(
+        event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent)
+    )
 
 
 # ==================== 注册 ====================
@@ -91,7 +117,10 @@ apology_matcher = on_notice(
 
 
 @apology_matcher.handle()
-async def handle_apology_withdraw(bot: Bot, event: MsgEmojiLikeNoticeEvent):
+async def handle_apology_withdraw(
+    bot: Bot,
+    event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
+):
     """超级管理员对 bot 消息贴 id100 表情（糗大了）时：道歉并撤回该消息"""
     # 仅处理表情 id 100（糗大了）
     if event.emoji_id != _APOLOGY_EMOJI_ID:

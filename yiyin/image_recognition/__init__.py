@@ -48,9 +48,9 @@ _RECOG_CACHE_ORDER: deque[str] = deque()
 _RECOG_CACHE_MAX = 500
 _recog_cache_lock = asyncio.Lock()
 
-# 识别冷却时间（秒），避免频繁调用 API
+# 识别冷却时间（秒）：当 LLM 返回 BEAUTY/FOOD 后，该时间内不处理新图片、不发送已进入流程的结果
 _RECOG_COOLDOWN_SEC = 60
-_last_recog_time: float = 0
+_cooldown_until: float = 0  # monotonic 时间戳，0 表示无冷却
 _recog_cooldown_lock = asyncio.Lock()
 
 
@@ -245,11 +245,16 @@ image_recognition_matcher = on_message(
 @image_recognition_matcher.handle()
 async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
     """对群内图片消息进行识别并响应（Rule 已校验本群已启用图片识别）"""
-    global _last_recog_time
+    global _cooldown_until
     group_id = str(event.group_id)
     urls = _extract_image_urls(event)
     if not urls:
         return
+
+    # [0] 冷却中：不处理新图片（若 LLM 刚返回 BEAUTY/FOOD 触发了冷却）
+    async with _recog_cooldown_lock:
+        if time.monotonic() < _cooldown_until:
+            return
 
     # 每条消息只处理第一张图片（避免刷屏）
     image_url = urls[0]
@@ -276,14 +281,6 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
 
     if not await _claim_image_for_recognition(image_url):
         return  # 该图已识别过，跳过
-
-    # 冷却时间：距上次识别至少 5 秒
-    async with _recog_cooldown_lock:
-        now = time.monotonic()
-        wait_sec = _last_recog_time + _RECOG_COOLDOWN_SEC - now
-        if wait_sec > 0:
-            await asyncio.sleep(wait_sec)
-        _last_recog_time = time.monotonic()  # 占用本次识别槽位
 
     messages = [
         {
@@ -330,6 +327,14 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
     )
 
     rec_type, name = _parse_llm_response(reply)
+
+    # BEAUTY/FOOD：需检查冷却。若冷却已由其他消息触发，则本消息（已进入流程）不发送
+    if rec_type in ("BEAUTY", "FOOD"):
+        async with _recog_cooldown_lock:
+            now = time.monotonic()
+            if now < _cooldown_until:
+                return  # 冷却中，不发送（其他消息已触发）
+            _cooldown_until = now + _RECOG_COOLDOWN_SEC  # 触发冷却
 
     reply_seg = MessageSegment.reply(event.message_id)
 

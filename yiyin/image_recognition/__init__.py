@@ -1,8 +1,9 @@
 """
 NoneBot2 图片识别插件（隐藏功能，需 /启用 图片识别）
 - 对启用了该功能的群聊，自动识别每条消息中的图片（不含 QQ 表情 face）
-- 调用 LLM 判断：1) 二次元/真人美女等 → 从 sao.json 随机回复
-- 2) 食物 → 自动收集到食物图鉴并提示（名称仅供参考，可用 /补充名字 调整）
+- 调用 LLM 判断：1) 二次元/真人美女等 → 从 sao.json 随机回复（可 /禁用 扫 关闭）
+- 2) 食物 → 自动收集到食物图鉴并提示（可 /禁用 食物自动拾取 关闭，名称仅供参考，可用 /补充名字 调整）
+- /禁用 图片识别 关闭整个功能；/禁用 扫 仅关闭美女回复；/禁用 食物自动拾取 仅关闭食物自动收集
 """
 
 import asyncio
@@ -22,7 +23,7 @@ from nonebot.rule import Rule
 
 from yiyin.food import add_food_from_image_url
 from yiyin.llmapi import chat_completion
-from yiyin.toggle import is_feature_enabled
+from yiyin.toggle import is_feature_enabled, is_plugin_enabled
 
 # ==================== 配置 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -339,13 +340,15 @@ async def handle_image_recognition(bot: Bot, event: GroupMessageEvent):
     reply_seg = MessageSegment.reply(event.message_id)
 
     if rec_type == "BEAUTY":
-        lines = _load_sao_lines()
-        if lines:
-            msg = random.choice(lines)
-            await bot.send(event, reply_seg + MessageSegment.text(msg))
+        if is_plugin_enabled("image_recognition_beauty", group_id):
+            lines = _load_sao_lines()
+            if lines:
+                msg = random.choice(lines)
+                await bot.send(event, reply_seg + MessageSegment.text(msg))
 
     elif rec_type == "FOOD":
-        result = await add_food_from_image_url(group_id, image_url, name)
-        if result:
-            hint = "名称仅供参考，可使用 /补充名字 <id> <名字> 调整"
-            await bot.send(event, reply_seg + MessageSegment.text(f"{result}\n{hint}"))
+        if is_plugin_enabled("image_recognition_food", group_id):
+            result = await add_food_from_image_url(group_id, image_url, name)
+            if result:
+                hint = "名称仅供参考，可使用 /补充名字 <id> <名字> 调整"
+                await bot.send(event, reply_seg + MessageSegment.text(f"{result}\n{hint}"))

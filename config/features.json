@@ -1,5 +1,7 @@
 {
     "plugins": {
+        "image_recognition_beauty": "扫",
+        "image_recognition_food": "食物自动拾取",
         "tarot": "塔罗牌",
         "quotes": "群友语录",
         "magazine": "群刊",

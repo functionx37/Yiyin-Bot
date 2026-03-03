@@ -36,6 +36,9 @@
 - **`is_feature_enabled(feature_key: str, group_id: str) -> bool`**
   - 供其他插件判断某 opt-in/hidden 功能是否在某群已启用。
   - 例：塔罗牌中「世界通知」、摩诃 均通过此函数判断。
+- **`is_plugin_enabled(plugin_key: str, group_id: str) -> bool`**
+  - 供其他插件判断某 plugins 功能是否在某群已启用（默认启用，被禁用则返回 False）。
+  - 例：图片识别中「扫」「食物自动拾取」通过此函数判断是否执行后续处理。
 
 ### 权限
 

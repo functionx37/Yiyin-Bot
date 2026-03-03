@@ -7,6 +7,7 @@ NoneBot2 塔罗牌插件
 """
 
 import json
+import re
 import random
 from datetime import date
 from io import BytesIO
@@ -182,6 +183,29 @@ async def handle_tarot_ten(bot: Bot, event: MessageEvent):
 
 
 # ==================== 占卜命令 ====================
+# 抽十连结果格式：包含「十连抽结果」，且恰好 10 行 【牌名】（英文名）正位/逆位
+# 牌名、英文名必须与 tarot.json 中的塔罗牌一致
+_TEN_DRAW_LINE_PATTERN = re.compile(r"【([^】]+)】[（(]([^）)]+)[）)](正位|逆位)")
+
+# 合法塔罗牌 (name_zh, name_en) 集合
+_VALID_TAROT_PAIRS: frozenset[tuple[str, str]] = frozenset(
+    (card["name_zh"], card["name_en"]) for card in TAROT_DATA
+)
+
+
+def _is_valid_ten_draw_result(text: str) -> bool:
+    """检查文本是否为抽十连结果格式，牌名和英文名必须是塔罗牌，不符合则不进行占卜"""
+    if not text or "十连抽结果" not in text:
+        return False
+    matches = _TEN_DRAW_LINE_PATTERN.findall(text)
+    if len(matches) != 10:
+        return False
+    for name_zh, name_en, _ in matches:
+        if (name_zh.strip(), name_en.strip()) not in _VALID_TAROT_PAIRS:
+            return False
+    return True
+
+
 _DIVINATION_PROMPT = (
     "你是一个资深塔罗牌占卜师"
     "用户会给你一组塔罗牌抽牌结果（十连抽），你需要根据牌面组合给出整体运势解读。\n"
@@ -209,6 +233,11 @@ async def handle_divination(bot: Bot, event: MessageEvent):
     if not cards_text:
         await divination_cmd.finish(
             MessageSegment.at(user_id) + " 请引用一条抽十连的结果来占卜哦~"
+        )
+
+    if not _is_valid_ten_draw_result(cards_text):
+        await divination_cmd.finish(
+            MessageSegment.at(user_id) + " 引用的不是抽十连结果格式，无法占卜哦~请先 /抽十连 再引用结果进行占卜。"
         )
 
     # 补充用户的提问（如有）

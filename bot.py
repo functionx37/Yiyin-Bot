@@ -25,16 +25,5 @@ driver.register_adapter(OneBotV11Adapter)
 
 nonebot.load_from_toml("pyproject.toml")
 
-# Tortoise ORM 1.x：ASGI lifespan 在后台任务初始化，请求在另一任务执行，
-# 需 _enable_global_fallback 才能跨任务访问数据库
-from tortoise import Tortoise
-
-_orig_init = Tortoise.init
-
-async def _patched_init(*args, _enable_global_fallback=True, **kwargs):
-    return await _orig_init(*args, _enable_global_fallback=_enable_global_fallback, **kwargs)
-
-Tortoise.init = _patched_init
-
 if __name__ == "__main__":
     nonebot.run()

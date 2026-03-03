@@ -17,8 +17,7 @@
         "apology_withdraw": "道歉撤回"
     },
     "optin": {
-        "nonebot_plugin_fakemsg": "伪造消息",
-        "nonebot_plugin_learning_chat": "复读"
+        "nonebot_plugin_fakemsg": "伪造消息"
     },
     "hidden": {
         "world_notify": "世界通知",

@@ -1,4 +1,8 @@
 """Yiyin Bot - NoneBot2 QQ 机器人"""
+# 在导入 nonebot 及插件前过滤 jieba 的 Python 3.12 转义序列警告
+import warnings
+warnings.filterwarnings("ignore", category=SyntaxWarning, module="jieba")
+
 from pathlib import Path
 
 try:

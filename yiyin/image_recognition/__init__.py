@@ -12,7 +12,7 @@ import random
 import tempfile
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -54,6 +54,37 @@ _RECOG_COOLDOWN_SEC = 60
 _cooldown_until: float = 0  # monotonic 时间戳，0 表示无冷却
 _recog_cooldown_lock = asyncio.Lock()
 
+# 日志清理：上次执行清理的时间（秒），避免每次追加都全量扫描
+_last_cleanup_time: float = 0
+_CLEANUP_INTERVAL_SEC = 3600  # 至少间隔 1 小时再执行一次清理
+
+
+def _cleanup_old_recognition_logs() -> None:
+    """清除一天以前的图片识别日志"""
+    if not LOG_FILE.exists():
+        return
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+        kept_lines: list[str] = []
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts_str = entry.get("time")
+                    if ts_str:
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        if ts >= cutoff:
+                            kept_lines.append(line)
+                except (json.JSONDecodeError, ValueError):
+                    kept_lines.append(line)  # 解析失败则保留
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write("\n".join(kept_lines) + ("\n" if kept_lines else ""))
+    except Exception:
+        logger.exception("图片识别日志清理失败")
+
 
 def _append_recognition_log(
     image_url: str,
@@ -62,6 +93,12 @@ def _append_recognition_log(
     llm_reply: str | None,
 ) -> None:
     """追加一条图片识别日志到 data/image_recognition/recognition.jsonl"""
+    global _last_cleanup_time
+    now = time.time()
+    if now - _last_cleanup_time >= _CLEANUP_INTERVAL_SEC:
+        _cleanup_old_recognition_logs()
+        _last_cleanup_time = now
+
     entry = {
         "time": datetime.now(timezone.utc).isoformat(),
         "image_url": image_url,
@@ -234,6 +271,10 @@ def _parse_llm_response(text: str) -> tuple[str, str | None]:
         return "FOOD", rest if rest else None
     return "OTHER", None
 
+
+# 启动时执行一次日志清理
+_cleanup_old_recognition_logs()
+_last_cleanup_time = time.time()
 
 # ==================== 注册 ====================
 image_recognition_matcher = on_message(

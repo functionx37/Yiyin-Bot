@@ -1,11 +1,11 @@
 """
 NoneBot2 食物图鉴插件（按群隔离）
 - 命令：/收集食物 [名字] [图片] — 保存食物图片，支持引用图片，可选名字
-- 命令：/删除食物 <id/名字> — 仅超级管理员，重名时提示用 id 操作
-- 命令：/补充名字 <id/名字> <新名字> — 重名时提示用 id 操作
-- 命令：/标记 <id/名字> <tag> — 为食物添加标签，重名时提示用 id 操作
-- 命令：/吃 <id/名字/tag> — tag 优先随机一条；id/名字则吃对应食物，重名则都吃
-- 命令：/隐藏 <id> — 将普通食物设为隐藏食物
+- 命令：/删除食物 <id/名字> — 仅超级管理员，支持引用食物消息自动提取 ID
+- 命令：/补充名字 <id/名字> <新名字> — 支持引用食物消息后 /补充名字 新名字 自动提取 ID
+- 命令：/标记 <id/名字> <tag> — 支持引用食物消息后 /标记 标签 自动提取 ID
+- 命令：/吃 <id/名字/tag> — 支持引用食物消息自动提取 ID
+- 命令：/隐藏 <id> — 将普通食物设为隐藏食物，支持引用食物消息自动提取 ID
 - 命令：/吃大餐 [数量] — 默认三道菜，最多十道
 - 触发：有人发「吃什么」时回复「是啊，吃什么」并随机一张图请你吃（单抽有概率触发隐藏食物）
 """
@@ -13,6 +13,7 @@ NoneBot2 食物图鉴插件（按群隔离）
 import asyncio
 import json
 import random
+import re
 import string
 from pathlib import Path
 
@@ -134,6 +135,54 @@ async def _extract_images(
                 pass
         images.extend(reply_images)
     return images
+
+
+# 从消息文本中解析食物 ID 的正则
+_FOOD_ID_PREFIX_RE = re.compile(r"食物ID[：:]\s*([A-Za-z0-9]+(?:\s*[、]\s*[A-Za-z0-9]+)*)")
+_FOOD_LABEL_RE = re.compile(r"『[^』]*』[（(]([A-Za-z0-9]+)[）)]")
+
+
+def _parse_food_ids_from_text(text: str) -> list[str]:
+    """从消息文本中解析食物 ID 列表。支持格式：食物ID：xxx、yyy；『name』（id）"""
+    ids: list[str] = []
+    # 1. 食物ID：Ab3x9K 或 食物ID：Ab3x9K、Bc4y2L
+    m = _FOOD_ID_PREFIX_RE.search(text)
+    if m:
+        part = m.group(1)
+        for sid in re.split(r"\s*[、]\s*", part):
+            sid = sid.strip()
+            if sid and sid not in ids:
+                ids.append(sid)
+    # 2. 『name』（id）格式
+    for m in _FOOD_LABEL_RE.finditer(text):
+        sid = m.group(1).strip()
+        if sid and sid not in ids:
+            ids.append(sid)
+    return ids
+
+
+async def _extract_food_ids_from_reply(
+    bot: Bot, event: GroupMessageEvent
+) -> list[str]:
+    """从引用的消息中提取食物 ID（一般为机器人发的食物相关消息）。无引用或解析失败返回空列表。"""
+    if not event.reply:
+        return []
+    try:
+        msg_data = await bot.get_msg(message_id=event.reply.message_id)
+        raw = msg_data.get("message", [])
+        if isinstance(raw, str):
+            text = Message(raw).extract_plain_text()
+        elif isinstance(raw, list):
+            text = "".join(
+                s.get("data", {}).get("text", "")
+                for s in raw
+                if isinstance(s, dict) and s.get("type") == "text"
+            )
+        else:
+            return []
+        return _parse_food_ids_from_text(text.strip())
+    except Exception:
+        return []
 
 
 def delete_food(group_id: str, food_id: str) -> bool:
@@ -337,11 +386,15 @@ async def handle_collect_food(
 async def handle_delete_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /删除食物 <id/名字>（仅超级管理员），重名时提示用 id 操作"""
+    """处理 /删除食物 <id/名字>（仅超级管理员），支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
+    if not text and event.reply:
+        reply_ids = await _extract_food_ids_from_reply(bot, event)
+        if len(reply_ids) == 1:
+            text = reply_ids[0]
     if not text:
         await delete_food_cmd.finish(
-            "请输入要删除的食物ID或名字，例如：/删除食物 Ab3x9K 或 /删除食物 蛋炒饭"
+            "请输入要删除的食物ID或名字，或引用食物消息后直接发送 /删除食物"
         )
 
     group_id = str(event.group_id)
@@ -365,16 +418,22 @@ async def handle_delete_food(
 async def handle_supplement_name(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /补充名字 <id/名字> <新名字>，重名时提示用 id 操作"""
+    """处理 /补充名字 <id/名字> <新名字>，支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
     parts = text.split(maxsplit=1)
-    if len(parts) < 2:
+    id_or_name: str | None = None
+    new_name: str | None = None
+    if len(parts) >= 2:
+        id_or_name, new_name = parts[0].strip(), parts[1].strip()
+    elif len(parts) == 1 and event.reply:
+        # 引用消息 + 仅一个参数 → 从引用提取 ID，参数作为新名字
+        reply_ids = await _extract_food_ids_from_reply(bot, event)
+        if len(reply_ids) == 1:
+            id_or_name, new_name = reply_ids[0], parts[0].strip()
+    if not id_or_name or not new_name:
         await supplement_name_cmd.finish(
-            "用法：/补充名字 <食物ID或名字> <新名字>，例如：/补充名字 Ab3x9K 蛋炒饭"
+            "用法：/补充名字 <食物ID或名字> <新名字>，或引用食物消息后发送 /补充名字 新名字"
         )
-    id_or_name, new_name = parts[0].strip(), parts[1].strip()
-    if not new_name:
-        await supplement_name_cmd.finish("请提供要补充的名字")
 
     group_id = str(event.group_id)
     ids, err = _resolve_id_or_name(group_id, id_or_name, allow_dup=False)
@@ -392,10 +451,16 @@ async def handle_supplement_name(
 async def handle_hidden_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /隐藏 <id>：将普通食物设为隐藏食物"""
+    """处理 /隐藏 <id>：将普通食物设为隐藏食物，支持引用食物消息自动提取 ID"""
     food_id = args.extract_plain_text().strip()
+    if not food_id and event.reply:
+        reply_ids = await _extract_food_ids_from_reply(bot, event)
+        if len(reply_ids) == 1:
+            food_id = reply_ids[0]
     if not food_id:
-        await hidden_food_cmd.finish("用法：/隐藏 <食物ID>，例如：/隐藏 Ab3x9K")
+        await hidden_food_cmd.finish(
+            "用法：/隐藏 <食物ID>，或引用食物消息后直接发送 /隐藏"
+        )
 
     group_id = str(event.group_id)
     index = _load_index(group_id)
@@ -411,16 +476,22 @@ async def handle_hidden_food(
 async def handle_tag_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /标记 <id/名字> <tag>，为食物添加标签，重名时提示用 id 操作"""
+    """处理 /标记 <id/名字> <tag>，支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
     parts = text.split(maxsplit=1)
-    if len(parts) < 2:
+    id_or_name: str | None = None
+    tag: str | None = None
+    if len(parts) >= 2:
+        id_or_name, tag = parts[0].strip(), parts[1].strip()
+    elif len(parts) == 1 and event.reply:
+        # 引用消息 + 仅一个参数 → 从引用提取 ID，参数作为标签
+        reply_ids = await _extract_food_ids_from_reply(bot, event)
+        if len(reply_ids) == 1:
+            id_or_name, tag = reply_ids[0], parts[0].strip()
+    if not id_or_name or not tag:
         await tag_food_cmd.finish(
-            "用法：/标记 <食物ID或名字> <标签>，例如：/标记 Ab3x9K 甜品"
+            "用法：/标记 <食物ID或名字> <标签>，或引用食物消息后发送 /标记 标签"
         )
-    id_or_name, tag = parts[0].strip(), parts[1].strip()
-    if not tag:
-        await tag_food_cmd.finish("请提供要添加的标签")
 
     group_id = str(event.group_id)
     ids, err = _resolve_id_or_name(group_id, id_or_name, allow_dup=False)
@@ -442,11 +513,18 @@ async def handle_tag_food(
 async def handle_eat(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /吃 <id/名字/tag>：tag 优先，从标签随机一条；id/名字则吃对应食物，重名则都吃"""
+    """处理 /吃 <id/名字/tag>：支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
+    if not text and event.reply:
+        reply_ids = await _extract_food_ids_from_reply(bot, event)
+        if len(reply_ids) == 1:
+            text = reply_ids[0]
+        elif len(reply_ids) > 1:
+            # 吃大餐等多条食物消息，取第一条
+            text = reply_ids[0]
     if not text:
         await eat_cmd.finish(
-            "用法：/吃 <食物ID/名字/标签>，例如：/吃 蛋炒饭 或 /吃 甜品"
+            "用法：/吃 <食物ID/名字/标签>，或引用食物消息后直接发送 /吃"
         )
 
     group_id = str(event.group_id)

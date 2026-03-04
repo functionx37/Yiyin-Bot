@@ -1,7 +1,7 @@
 """
-NoneBot2 道歉撤回插件
-- 当群主、群管理或超级管理员对 bot 的消息贴上 id 100 的表情（糗大了）时，bot 发一句道歉并撤回该消息
-- 若撤回的是图片识别的食物添加消息，会同步删除对应食物记录并通知
+NoneBot2 撤回插件
+- 当群主、群管理或超级管理员对 bot 的消息贴上 id 100 的表情（糗大了）时，bot 尝试撤回该消息（不发道歉）
+- 若为图片识别的食物添加消息，会同步删除对应食物记录并通知（撤回失败也会执行）
 - 依赖 NapCat 等协议端上报 msg_emoji_like / group_msg_emoji_like 通知事件
 """
 
@@ -109,7 +109,7 @@ def _is_msg_emoji_like(event: NoticeEvent) -> bool:
 
 
 def _is_apology_emoji(event: NoticeEvent) -> bool:
-    """是否为糗大了表情（id 100），仅此表情才触发道歉撤回"""
+    """是否为糗大了表情（id 100），仅此表情才触发撤回"""
     if not isinstance(
         event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent)
     ):
@@ -118,7 +118,7 @@ def _is_apology_emoji(event: NoticeEvent) -> bool:
 
 
 # ==================== 注册 ====================
-apology_matcher = on_notice(
+withdraw_matcher = on_notice(
     Rule(_is_msg_emoji_like, _is_apology_emoji),
     priority=5,
     block=True,
@@ -126,12 +126,12 @@ apology_matcher = on_notice(
 )
 
 
-@apology_matcher.handle()
-async def handle_apology_withdraw(
+@withdraw_matcher.handle()
+async def handle_msg_withdraw(
     bot: Bot,
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
-    """群主/群管理/超级管理员对 bot 消息贴 id100 表情（糗大了）时：道歉并撤回该消息"""
+    """群主/群管理/超级管理员对 bot 消息贴 id100 表情（糗大了）时：仅尝试撤回该消息"""
     # Rule 已保证 emoji_id==100；仅处理群消息（需 group_id 用于 delete_food 和 send）
     if not event.group_id:
         return
@@ -156,13 +156,18 @@ async def handle_apology_withdraw(
         if delete_food(group_id, food_id):
             deleted_food_id = food_id
 
+    # 仅尝试撤回，超时失败也不影响后续操作
     try:
-        await bot.send_group_msg(group_id=event.group_id, message="果咩纳塞！")
         await bot.call_api("delete_msg", message_id=bot_msg_id)
-        if deleted_food_id:
+    except Exception as e:
+        logger.warning(f"撤回消息失败（可能超时）: {e}")
+
+    # 若删除了食物记录，发送通知（无论撤回是否成功）
+    if deleted_food_id:
+        try:
             await bot.send_group_msg(
                 group_id=event.group_id,
                 message=f"已删除对应食物记录（ID：{deleted_food_id}）",
             )
-    except Exception as e:
-        logger.warning(f"道歉撤回失败: {e}")
+        except Exception as e:
+            logger.warning(f"发送食物删除通知失败: {e}")

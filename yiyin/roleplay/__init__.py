@@ -180,11 +180,10 @@ def _format_user_content(sender_name: str, text: str, is_superuser: bool) -> str
 
 def _build_messages(
     group_id: int,
-    current_text: str,
     sender_name: str,
     is_superuser: bool,
 ) -> list[dict]:
-    """构建发送给 LLM 的消息列表"""
+    """构建发送给 LLM 的消息列表。当前用户消息已在 handle 中写入 history，此处直接取用"""
     messages: list[dict[str, str]] = [{"role": "system", "content": _load_prompt()}]
 
     max_ctx = _cfg("max_context_messages")
@@ -192,32 +191,46 @@ def _build_messages(
     for msg in history:
         messages.append({"role": msg["role"], "content": msg["content"]})
 
-    content = _format_user_content(sender_name, current_text, is_superuser)
-    messages.append({"role": "user", "content": content})
-
     return messages
 
 
 def _split_reply(text: str) -> list[str]:
-    """按句号、问号、感叹号等标点分段，返回非空片段列表"""
+    """按句号、问号、感叹号等标点分段，短句合并，避免「你好」「你好」式机械分段"""
     if not text or not text.strip():
         return []
+    text = text.strip()
+    # 总长过短直接整条发，不拆分
+    if len(text) <= 25:
+        return [text]
     # 按 。！？；… 等标点分割，保留分隔符在上一句末尾
-    parts = re.split(r"([。！？；…])", text.strip())
-    result: list[str] = []
+    parts = re.split(r"([。！？；…])", text)
+    raw: list[str] = []
     buf = ""
-    for i, p in enumerate(parts):
+    for p in parts:
         if p in "。！？；…":
             buf += p
             s = buf.strip()
             if s:
-                result.append(s)
+                raw.append(s)
             buf = ""
         else:
             buf += p
     if buf.strip():
-        result.append(buf.strip())
-    return result
+        raw.append(buf.strip())
+    # 短句（≤8 字）合并到下一句，避免「你好。」「你好。」拆成两条
+    merged: list[str] = []
+    i = 0
+    while i < len(raw):
+        seg = raw[i]
+        while i + 1 < len(raw) and len(seg) <= 8:
+            seg += raw[i + 1]
+            i += 1
+        merged.append(seg)
+        i += 1
+    # 合并后只有一条，或每条都很短，则整条发
+    if len(merged) <= 1 or (len(merged) == 2 and len(merged[0]) <= 15 and len(merged[1]) <= 15):
+        return [text]
+    return merged
 
 
 # ==================== 消息匹配规则 ====================
@@ -251,6 +264,9 @@ async def handle_group_msg(bot: Bot, event: GroupMessageEvent):
     at_me = event.to_me
 
     if not at_me:
+        # 随机参与时跳过纯图片等无文字消息，避免无意义回复
+        if not text or not text.strip():
+            return
         now = time.time()
         if now - _last_reply_time[group_id] < _cfg("cooldown_seconds"):
             return
@@ -258,7 +274,7 @@ async def handle_group_msg(bot: Bot, event: GroupMessageEvent):
             return
 
     # 构建并调用 LLM
-    messages = _build_messages(group_id, text, sender_name, is_superuser)
+    messages = _build_messages(group_id, sender_name, is_superuser)
 
     reply = await chat_completion(
         messages,

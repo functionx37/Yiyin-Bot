@@ -86,12 +86,20 @@
                 "description": "保存食物图片"
             },
             {
-                "command": "/删除食物 <ID>",
-                "description": "删除指定ID的食物（仅超级管理员）"
+                "command": "/删除食物 <ID/名字>",
+                "description": "删除指定食物（仅超级管理员）"
             },
             {
-                "command": "/补充名字 <ID> <名字>",
+                "command": "/补充名字 <ID/旧名字> <新名字>",
                 "description": "为食物补充或修改名字"
+            },
+            {
+                "command": "/标记 <ID/名字> <标签>",
+                "description": "为食物添加标签"
+            },
+            {
+                "command": "/吃 <ID/名字/标签>",
+                "description": "吃指定食物"
             },
             {
                 "command": "/吃大餐 (数量)",

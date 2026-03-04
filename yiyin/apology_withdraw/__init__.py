@@ -1,6 +1,6 @@
 """
 NoneBot2 道歉撤回插件
-- 当超级管理员对 bot 的消息贴上 id 100 的表情（糗大了）时，bot 发一句道歉并撤回该消息
+- 当群主、群管理或超级管理员对 bot 的消息贴上 id 100 的表情（糗大了）时，bot 发一句道歉并撤回该消息
 - 若撤回的是图片识别的食物添加消息，会同步删除对应食物记录并通知
 - 依赖 NapCat 等协议端上报 msg_emoji_like / group_msg_emoji_like 通知事件
 """
@@ -12,6 +12,7 @@ from nonebot import on_notice
 from nonebot.adapters.onebot.v11 import Bot, Message
 from nonebot.adapters.onebot.v11.event import NoticeEvent
 from nonebot.log import logger
+from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 from nonebot.permission import SUPERUSER
 from nonebot.rule import Rule
 
@@ -121,7 +122,7 @@ apology_matcher = on_notice(
     Rule(_is_msg_emoji_like, _is_apology_emoji),
     priority=5,
     block=True,
-    permission=SUPERUSER,
+    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
 )
 
 
@@ -130,7 +131,7 @@ async def handle_apology_withdraw(
     bot: Bot,
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
-    """超级管理员对 bot 消息贴 id100 表情（糗大了）时：道歉并撤回该消息"""
+    """群主/群管理/超级管理员对 bot 消息贴 id100 表情（糗大了）时：道歉并撤回该消息"""
     # Rule 已保证 emoji_id==100；仅处理群消息（需 group_id 用于 delete_food 和 send）
     if not event.group_id:
         return

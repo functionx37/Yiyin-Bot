@@ -64,7 +64,11 @@ def _is_superuser(user_id: str) -> bool:
 @event_preprocessor
 async def blacklist_filter(event: Event):
     """在事件分发前拦截黑名单用户：忽略其所有消息"""
-    user_id = event.get_user_id()
+    try:
+        user_id = event.get_user_id()
+    except ValueError:
+        # 无用户上下文的事件（如 meta、lifecycle 等）直接放行
+        return
     if not user_id:
         return
 

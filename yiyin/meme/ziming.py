@@ -35,9 +35,9 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont:
 
 # ==================== 解析 （文本1）（文本2）（文本3） ====================
 def _parse_strong_args(text: str) -> list[str]:
-    """解析中文括号内的三组文本，不足补空字符串"""
-    # 匹配 （...） 或 （） 即允许空
-    parts = re.findall(r"（(.*?)）", text)
+    """解析中文括号内的三组文本，不足补空字符串。支持括号内直接换行。"""
+    # 匹配 （...） 或 （） 即允许空；DOTALL 使 . 匹配换行，支持多行输入
+    parts = re.findall(r"（(.*?)）", text, re.DOTALL)
     while len(parts) < 3:
         parts.append("")
     return parts[:3]
@@ -55,12 +55,14 @@ def _parse_strong_args(text: str) -> list[str]:
 # _FONT_SIZE_RATIO：字号 = 图宽 × 该比例（再被 MIN/MAX 限制）
 #   - 数值越大字越大，例如 1/16 比 1/22 大
 # _FONT_SIZE_MIN / _FONT_SIZE_MAX：字号的像素上下限
+# _LINE_SPACING：多行文本行距倍数（1.0=无间隙，1.3=1.3 倍行高）
 #
 _TEXT_X_RATIOS = (0.13, 0.50, 0.86)   # 左、中、右（1 再往左一点，2 再往右一点）
 _TEXT_Y_RATIO = 0.15                   # 整体往下一点对准箭头
 _FONT_SIZE_RATIO = 1 / 17              # 字号稍小一点
 _FONT_SIZE_MIN = 18
 _FONT_SIZE_MAX = 96
+_LINE_SPACING = 1.25                   # 多行时行距
 
 
 def _draw_bibi(texts: list[str]) -> bytes:
@@ -83,14 +85,17 @@ def _draw_bibi(texts: list[str]) -> bytes:
             continue
         cx = int(w * _TEXT_X_RATIOS[i])
         cy = int(h * _TEXT_Y_RATIO)
-        bbox = draw.textbbox((0, 0), s, font=font)
+        line_height = int(font_size * _LINE_SPACING)
+        spacing = line_height - font_size  # multiline_text 的 spacing 是行间距
+        bbox = draw.textbbox((0, 0), s, font=font, spacing=spacing)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
         x = cx - tw // 2
         y = cy - th
-        draw.text(
+        draw.multiline_text(
             (x, y), s, font=font, fill=fill,
             stroke_width=stroke_width, stroke_fill=(255, 255, 255),
+            spacing=spacing, align="center",
         )
 
     buf = BytesIO()
@@ -109,7 +114,8 @@ async def handle_qiangqiang(bot: Bot, event: MessageEvent, args: Message = Comma
     if not raw:
         await qiangqiang_cmd.finish(
             "用法：/强强 （文本1）（文本2）（文本3）\n"
-            "用中文括号括起三段文字，中间可以为空，例如：/强强 （左）（中）（右）"
+            "用中文括号括起三段文字，中间可以为空，例如：/强强 （左）（中）（右）\n"
+            "支持换行：可直接在消息里换行"
         )
     parts = _parse_strong_args(raw)
     try:

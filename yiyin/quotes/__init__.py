@@ -1,7 +1,7 @@
 """
 NoneBot2 群友语录插件
 - 命令：/新增群友 <群友昵称>
-- 命令：/新增别名 <已有昵称> <别名>
+- 命令：/新增别名 <已有昵称> <别名>（若两者均存在，则把后者当别名并合并其语录到前者）
 - 命令：/群友列表
 - 命令：/上传 <群友昵称> [图片]（支持多张图片含引用，依次处理；出错回滚）
 - 命令：/截图上传 <群友昵称> [引用消息]
@@ -9,13 +9,14 @@ NoneBot2 群友语录插件
 - 命令：/随机群友 [昵称]（等概率随机一个有语录的群友再随机一条；指定昵称则从该群友语录中随机）
 - 命令：/随机语录（从本群全部语录中随机抽取一条）
 - 命令：/随机精华（从群精华消息中随机抽一条，格式：昵称：内容）
-- 命令：/删除语录 <ID>（仅超级管理员）
+- 命令：/删除语录 <ID>（仅超级管理员，支持引用语录消息后 /删除语录 自动提取 ID）
 - 命令：/删除群友 <昵称>（仅超级管理员，打上删除标记，不再显示但不清理 data）
 - 功能：记录并随机查看群友的发言截图
 """
 
 import json
 import random
+import re
 import string
 from pathlib import Path
 
@@ -321,11 +322,43 @@ async def handle_add_member(
     await add_member_cmd.finish(f"已成功添加群友「{name}」✓")
 
 
+def _merge_member_quotes_into(
+    group_id: str, from_member: str, to_member: str
+) -> int:
+    """将 from_member 下的语录移动到 to_member 下，更新 index，返回移动条数。"""
+    index = _load_index(group_id)
+    from_dir = _get_member_image_dir(group_id, from_member)
+    to_dir = _get_member_image_dir(group_id, to_member)
+    moved = 0
+    for short_id, entry in list(index.items()):
+        if entry.get("member") != from_member:
+            continue
+        fn = entry.get("filename") or f"{short_id}.png"
+        src = from_dir / fn
+        if not src.exists():
+            continue
+        to_dir.mkdir(parents=True, exist_ok=True)
+        dst = to_dir / fn
+        if dst.exists() and dst != src:
+            dst.unlink()
+        src.rename(dst)
+        index[short_id] = {"member": to_member, "filename": fn}
+        moved += 1
+    if moved > 0:
+        _save_index(group_id, index)
+    if from_dir.exists():
+        try:
+            from_dir.rmdir()
+        except OSError:
+            pass
+    return moved
+
+
 @add_alias_cmd.handle()
 async def handle_add_alias(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /新增别名 命令"""
+    """处理 /新增别名 命令。若 A、B 均存在，则把 B 当作 A 的别名，并将 B 下的语录合并到 A。"""
     text = args.extract_plain_text().strip()
     parts = text.split()
     if len(parts) < 2:
@@ -344,19 +377,42 @@ async def handle_add_alias(
             f"群友「{existing_name}」不存在，请先使用 /新增群友 {existing_name} 添加"
         )
 
-    members = _load_members(group_id)
-    if alias in members:
-        await add_alias_cmd.finish(f"「{alias}」已是一个群友的主昵称，不能用作别名")
+    if canonical == alias:
+        await add_alias_cmd.finish("主昵称与别名不能相同")
 
+    members = _load_members(group_id)
     aliases = _load_aliases(group_id)
+
     if alias in aliases:
         await add_alias_cmd.finish(
             f"「{alias}」已是群友「{aliases[alias]}」的别名"
         )
 
-    aliases[alias] = canonical
-    _save_aliases(group_id, aliases)
-    await add_alias_cmd.finish(f"已为群友「{canonical}」添加别名「{alias}」✓")
+    if alias in members:
+        # B 是主昵称：把 B 当作 A 的别名，合并 B 的语录到 A
+        alias_canonical = alias
+        moved = _merge_member_quotes_into(group_id, alias_canonical, canonical)
+        # 将 B 的别名全部改为指向 A
+        for a, c in list(aliases.items()):
+            if c == alias_canonical:
+                aliases[a] = canonical
+        aliases[alias] = canonical
+        members.remove(alias)
+        _save_members(group_id, members)
+        _save_aliases(group_id, aliases)
+        deleted = _load_deleted_members(group_id)
+        if alias in deleted:
+            deleted.discard(alias)
+            _save_deleted_members(group_id, deleted)
+        msg = f"已将群友「{alias}」设为「{canonical}」的别名"
+        if moved > 0:
+            msg += f"，并合并了 {moved} 条语录到「{canonical}」"
+        await add_alias_cmd.finish(msg + "✓")
+    else:
+        # B 不是主昵称：常规添加别名
+        aliases[alias] = canonical
+        _save_aliases(group_id, aliases)
+        await add_alias_cmd.finish(f"已为群友「{canonical}」添加别名「{alias}」✓")
 
 
 @list_members_cmd.handle()
@@ -498,6 +554,60 @@ async def handle_upload(
         f"{prefix}已成功为群友「{canonical}」保存 {len(downloaded)} 张语录截图✓\n"
         f"语录ID：{id_str}"
     )
+
+
+# 从消息文本中解析语录 ID 的正则
+_QUOTE_ID_PREFIX_RE = re.compile(r"语录ID[：:]\s*([A-Za-z0-9]+(?:\s*[、]\s*[A-Za-z0-9]+)*)")
+_QUOTE_LABEL_RE = re.compile(r"「([A-Za-z0-9]+)」【对应截图】")
+_QUOTE_ID_HINT_RE = re.compile(r"[（(]ID[：:]\s*([A-Za-z0-9]+)[）)]")
+
+
+def _parse_quote_ids_from_text(text: str) -> list[str]:
+    """从消息文本中解析语录 ID 列表。支持格式：语录ID：xxx、yyy；「id」【对应截图】；（ID：xxx）"""
+    ids: list[str] = []
+    # 1. 语录ID：Ab3x9K 或 语录ID：Ab3x9K、Bc4y2L
+    m = _QUOTE_ID_PREFIX_RE.search(text)
+    if m:
+        part = m.group(1)
+        for sid in re.split(r"\s*[、]\s*", part):
+            sid = sid.strip()
+            if sid and sid not in ids:
+                ids.append(sid)
+    # 2. 「id」【对应截图】格式
+    for m in _QUOTE_LABEL_RE.finditer(text):
+        sid = m.group(1).strip()
+        if sid and sid not in ids:
+            ids.append(sid)
+    # 3. （ID：xxx）格式
+    for m in _QUOTE_ID_HINT_RE.finditer(text):
+        sid = m.group(1).strip()
+        if sid and sid not in ids:
+            ids.append(sid)
+    return ids
+
+
+async def _extract_quote_ids_from_reply(
+    bot: Bot, event: GroupMessageEvent
+) -> list[str]:
+    """从引用的消息中提取语录 ID（一般为机器人发的语录相关消息）。无引用或解析失败返回空列表。"""
+    if not event.reply:
+        return []
+    try:
+        msg_data = await bot.get_msg(message_id=event.reply.message_id)
+        raw = msg_data.get("message", [])
+        if isinstance(raw, str):
+            text = Message(raw).extract_plain_text()
+        elif isinstance(raw, list):
+            text = "".join(
+                s.get("data", {}).get("text", "")
+                for s in raw
+                if isinstance(s, dict) and s.get("type") == "text"
+            )
+        else:
+            return []
+        return _parse_quote_ids_from_text(text.strip())
+    except Exception:
+        return []
 
 
 async def _extract_reply_text(bot: Bot, event: GroupMessageEvent) -> str:
@@ -877,10 +987,17 @@ async def handle_random_essence(bot: Bot, event: GroupMessageEvent):
 async def handle_delete_quote(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /删除语录 命令（仅超级管理员）"""
+    """处理 /删除语录 命令（仅超级管理员），支持引用语录消息后 /删除语录 自动提取 ID"""
     quote_id = args.extract_plain_text().strip()
+    if not quote_id and event.reply:
+        reply_ids = await _extract_quote_ids_from_reply(bot, event)
+        if len(reply_ids) == 1:
+            quote_id = reply_ids[0]
     if not quote_id:
-        await delete_quote_cmd.finish("请输入要删除的语录ID，例如：/删除语录 Ab3x9K")
+        await delete_quote_cmd.finish(
+            "请输入要删除的语录ID，例如：/删除语录 Ab3x9K\n"
+            "或引用语录消息后直接发送 /删除语录 自动提取 ID"
+        )
 
     group_id = str(event.group_id)
     index = _load_index(group_id)

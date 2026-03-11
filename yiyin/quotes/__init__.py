@@ -21,8 +21,9 @@ import string
 from pathlib import Path
 
 import httpx
-from nonebot import on_command
+from nonebot import on_command, on_message
 from nonebot.log import logger
+from nonebot.matcher import Matcher
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
@@ -282,6 +283,35 @@ add_member_cmd = on_command("新增群友", priority=10, block=True)
 add_alias_cmd = on_command("新增别名", priority=10, block=True)
 list_members_cmd = on_command("群友列表", priority=10, block=True)
 upload_cmd = on_command("上传", priority=10, block=True)
+
+
+def _upload_image_first_rule(event: GroupMessageEvent) -> bool:
+    """仅当消息首段为非文本（如图片）且包含上传命令时触发，用于支持「图片在上指令在下」"""
+    msg = event.get_message()
+    if not msg or msg[0].is_text():
+        return False  # 首段是文本时由 on_command 处理
+    text = msg.extract_plain_text().strip()
+    if not text:
+        return False
+    # 匹配 /上传 或 .上传 等，排除「截图上传」
+    if not re.search(r"[/.\!！]上传(?:\s|$)", text):
+        return False
+    # 消息中需有图片或引用含图
+    has_image = any(seg.type == "image" for seg in msg)
+    if not has_image and not (
+        event.reply
+        and event.reply.message
+        and any(seg.type == "image" for seg in event.reply.message)
+    ):
+        return False
+    return True
+
+
+upload_image_first_cmd = on_message(
+    _upload_image_first_rule, priority=9, block=True
+)  # priority 略低于 on_command，但 on_command 在首段非文本时不会匹配
+
+
 screenshot_upload_cmd = on_command("截图上传", priority=10, block=True)
 view_cmd = on_command("查看", priority=10, block=True)
 random_member_cmd = on_command("随机群友", priority=10, block=True)
@@ -467,20 +497,22 @@ async def handle_list_members(bot: Bot, event: GroupMessageEvent):
     await list_members_cmd.finish()
 
 
-@upload_cmd.handle()
-async def handle_upload(
-    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
-):
-    """处理 /上传 命令：支持多张图片（含引用），全部成功才写入，任一出错则回滚"""
-    name = args.extract_plain_text().strip()
+async def _do_upload(
+    bot: Bot,
+    event: GroupMessageEvent,
+    name: str,
+    args: Message,
+    matcher: Matcher,
+) -> None:
+    """上传语录的核心逻辑，供 on_command 与 on_message（图片在上）共用"""
     if not name:
-        await upload_cmd.finish("请输入群友昵称并附带图片，例如：/上传 小明 [图片]")
+        await matcher.finish("请输入群友昵称并附带图片，例如：/上传 小明 [图片]")
 
     group_id = str(event.group_id)
     deleted = _load_deleted_members(group_id)
     canonical = _resolve_name(group_id, name, exclude_deleted=False)
     if canonical and canonical in deleted:
-        await upload_cmd.finish(f"群友「{canonical}」已被删除，无法上传")
+        await matcher.finish(f"群友「{canonical}」已被删除，无法上传")
 
     auto_registered = False
     if not canonical:
@@ -492,7 +524,7 @@ async def handle_upload(
 
     images = await _extract_images(bot, event, args)
     if not images:
-        await upload_cmd.finish(
+        await matcher.finish(
             "请在命令中附带图片或引用含图片的消息，例如：/上传 小明 [图片]"
         )
 
@@ -520,7 +552,7 @@ async def handle_upload(
                     members = _load_members(group_id)
                     members.remove(canonical)
                     _save_members(group_id, members)
-                await upload_cmd.finish(
+                await matcher.finish(
                     f"图片下载失败，已回滚（未修改数据），请稍后重试"
                 )
 
@@ -529,7 +561,7 @@ async def handle_upload(
             members = _load_members(group_id)
             members.remove(canonical)
             _save_members(group_id, members)
-        await upload_cmd.finish("未获取到有效图片，请检查后重试")
+        await matcher.finish("未获取到有效图片，请检查后重试")
 
     # 全部下载成功，再写入 index 和文件（任一步失败则回滚）
     try:
@@ -546,14 +578,33 @@ async def handle_upload(
             members = _load_members(group_id)
             members.remove(canonical)
             _save_members(group_id, members)
-        await upload_cmd.finish("保存失败，已回滚（未修改数据），请稍后重试")
+        await matcher.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
     prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
     id_str = "、".join(sid for sid, _ in downloaded)
-    await upload_cmd.finish(
+    await matcher.finish(
         f"{prefix}已成功为群友「{canonical}」保存 {len(downloaded)} 张语录截图✓\n"
         f"语录ID：{id_str}"
     )
+
+
+@upload_cmd.handle()
+async def handle_upload(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    """处理 /上传 命令：支持多张图片（含引用），全部成功才写入，任一出错则回滚"""
+    name = args.extract_plain_text().strip()
+    await _do_upload(bot, event, name, args, upload_cmd)
+
+
+@upload_image_first_cmd.handle()
+async def handle_upload_image_first(bot: Bot, event: GroupMessageEvent):
+    """处理「图片在上、指令在下」的 /上传：NoneBot 命令匹配首段须为文本，首段为图时需额外处理"""
+    msg = event.get_message()
+    text = msg.extract_plain_text().strip()
+    m = re.search(r"[/.\!！]上传\s*(.*)", text)
+    name = m.group(1).strip() if m and m.group(1) else ""
+    await _do_upload(bot, event, name, msg, upload_image_first_cmd)
 
 
 # 从消息文本中解析语录 ID 的正则

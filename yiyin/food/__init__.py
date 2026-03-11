@@ -18,8 +18,9 @@ import string
 from pathlib import Path
 
 import httpx
-from nonebot import on_command, on_keyword
+from nonebot import on_command, on_keyword, on_message
 from nonebot.log import logger
+from nonebot.matcher import Matcher
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
@@ -305,6 +306,33 @@ async def add_food_from_image_url(
 
 # ==================== 注册命令 ====================
 collect_food_cmd = on_command("收集食物", priority=10, block=True)
+
+
+def _collect_food_image_first_rule(event: GroupMessageEvent) -> bool:
+    """仅当消息首段为非文本（如图片）且包含收集食物命令时触发，用于支持「图片在上指令在下」"""
+    msg = event.get_message()
+    if not msg or msg[0].is_text():
+        return False  # 首段是文本时由 on_command 处理
+    text = msg.extract_plain_text().strip()
+    if not text:
+        return False
+    if not re.search(r"[/.\!！]收集食物(?:\s|$)", text):
+        return False
+    has_image = any(seg.type == "image" for seg in msg)
+    if not has_image and not (
+        event.reply
+        and event.reply.message
+        and any(seg.type == "image" for seg in event.reply.message)
+    ):
+        return False
+    return True
+
+
+collect_food_image_first_cmd = on_message(
+    _collect_food_image_first_rule, priority=9, block=True
+)
+
+
 delete_food_cmd = on_command(
     "删除食物", priority=10, block=True, permission=SUPERUSER
 )
@@ -320,22 +348,21 @@ what_to_eat_matcher = on_keyword({"吃什么"}, priority=50, block=False)
 
 
 # ==================== 命令处理 ====================
-@collect_food_cmd.handle()
-async def handle_collect_food(
-    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
-):
-    """处理 /收集食物 [名字] [图片]：全部下载成功才写入，任一出错则回滚"""
-    group_id = str(event.group_id)
-    text = args.extract_plain_text().strip()
-    name = text if text else None
-
+async def _do_collect_food(
+    bot: Bot,
+    event: GroupMessageEvent,
+    name: str | None,
+    args: Message,
+    matcher: Matcher,
+) -> None:
+    """收集食物的核心逻辑，供 on_command 与 on_message（图片在上）共用"""
     images = await _extract_images(bot, event, args)
     if not images:
-        await collect_food_cmd.finish(
+        await matcher.finish(
             "请在命令中附带图片或引用含图片的消息，例如：/收集食物 蛋炒饭 [图片]"
         )
 
-    # 先下载全部图片，任一出错则不改动 index.json
+    group_id = str(event.group_id)
     index = _load_index(group_id)
     existing_ids = set(index.keys())
     downloaded: list[tuple[str, bytes]] = []  # (short_id, content)
@@ -353,14 +380,13 @@ async def handle_collect_food(
                 downloaded.append((short_id, resp.content))
             except Exception:
                 logger.exception(f"下载食物图片失败: {url}")
-                await collect_food_cmd.finish(
+                await matcher.finish(
                     "图片下载失败，已回滚（未修改数据），请稍后重试"
                 )
 
     if not downloaded:
-        await collect_food_cmd.finish("未获取到有效图片，请检查后重试")
+        await matcher.finish("未获取到有效图片，请检查后重试")
 
-    # 全部下载成功，再写入 index 和文件（任一步失败则回滚）
     images_dir = _get_images_dir(group_id)
     images_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -373,13 +399,34 @@ async def handle_collect_food(
         logger.exception("保存食物文件失败，回滚")
         for short_id, _ in downloaded:
             (images_dir / f"{short_id}.png").unlink(missing_ok=True)
-        await collect_food_cmd.finish("保存失败，已回滚（未修改数据），请稍后重试")
+        await matcher.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
     id_str = "、".join(sid for sid, _ in downloaded)
     name_hint = f"「{name}」" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
-    await collect_food_cmd.finish(
+    await matcher.finish(
         f"已保存 {len(downloaded)} 张食物图✓ {name_hint}\n食物ID：{id_str}"
     )
+
+
+@collect_food_cmd.handle()
+async def handle_collect_food(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    """处理 /收集食物 [名字] [图片]：全部下载成功才写入，任一出错则回滚"""
+    text = args.extract_plain_text().strip()
+    name = text if text else None
+    await _do_collect_food(bot, event, name, args, collect_food_cmd)
+
+
+@collect_food_image_first_cmd.handle()
+async def handle_collect_food_image_first(bot: Bot, event: GroupMessageEvent):
+    """处理「图片在上、指令在下」的 /收集食物"""
+    msg = event.get_message()
+    text = msg.extract_plain_text().strip()
+    m = re.search(r"[/.\!！]收集食物\s*(.*)", text)
+    name_part = m.group(1).strip() if m and m.group(1) else ""
+    name = name_part if name_part else None
+    await _do_collect_food(bot, event, name, msg, collect_food_image_first_cmd)
 
 
 @delete_food_cmd.handle()

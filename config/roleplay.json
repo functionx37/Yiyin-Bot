@@ -1,6 +1,6 @@
 {
   "model": "gpt-5.1",
-  "reply_probability": 0.5,
+  "reply_probability": 0.1,
   "max_context_messages": 30,
   "cooldown_seconds": 100,
   "max_reply_tokens": 512,

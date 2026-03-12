@@ -1,7 +1,5 @@
 {
     "plugins": {
-        "image_recognition_beauty": "扫",
-        "image_recognition_food": "食物自动拾取",
         "tarot": "塔罗牌",
         "quotes": "群友语录",
         "magazine": "群刊",
@@ -23,6 +21,6 @@
     "hidden": {
         "world_notify": "世界通知",
         "mohe": "摩诃",
-        "image_recognition": "图片识别"
+        "yiyin.food.auto_collect": "自动食物收集"
     }
 }

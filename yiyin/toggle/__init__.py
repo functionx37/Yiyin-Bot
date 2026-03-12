@@ -108,9 +108,9 @@ def is_feature_enabled(feature_key: str, group_id: str) -> bool:
 def is_plugin_enabled(plugin_key: str, group_id: str) -> bool:
     """检查指定插件级功能是否在指定群已启用（默认启用，被禁用则返回 False）
 
-    供其他插件调用，例如自动食物收集检查食物自动拾取是否启用：
+    供其他插件调用，例如检查某插件是否在某群已启用：
         from yiyin.toggle import is_plugin_enabled
-        if is_plugin_enabled("image_recognition_food", group_id): ...
+        if is_plugin_enabled("tarot", group_id): ...
     """
     if plugin_key not in PLUGIN_REGISTRY:
         return True  # 未注册的插件默认启用

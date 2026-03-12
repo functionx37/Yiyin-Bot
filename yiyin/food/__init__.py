@@ -1,6 +1,7 @@
 """
 NoneBot2 食物图鉴插件（按群隔离）
 - 命令：/收集食物 [名字] [图片] — 保存食物图片，支持引用图片，可选名字
+- 子模块 auto_collect：自动食物收集（常关，需 /启用 自动食物收集）
 - 命令：/删除食物 <id/名字> — 仅超级管理员，支持引用食物消息自动提取 ID
 - 命令：/补充名字 <id/名字> <新名字> — 支持引用食物消息后 /补充名字 新名字 自动提取 ID
 - 命令：/标记 <id/名字> <tag> — 支持引用食物消息后 /标记 标签 自动提取 ID
@@ -750,3 +751,6 @@ async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
     await bot.send(event, "是啊，吃什么")
     msg = MessageSegment.text("请你吃") + MessageSegment.text(label) + MessageSegment.text("怎么样？\n") + MessageSegment.image(filepath.read_bytes())
     await what_to_eat_matcher.finish(msg)
+
+
+from yiyin.food import auto_collect  # noqa: F401

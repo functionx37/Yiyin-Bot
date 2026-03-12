@@ -8,7 +8,6 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
-from pilmoji import Pilmoji
 
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
@@ -17,7 +16,7 @@ from nonebot.params import CommandArg
 # ==================== 资源路径 ====================
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 MOTIS_IMAGE_PATH = _PROJECT_ROOT / "assets" / "images" / "meme" / "motis.jpg"
-FONT_PATH = _PROJECT_ROOT / "assets" / "fonts" / "msyh.ttc"
+FONT_PATH = _PROJECT_ROOT / "assets" / "fonts" / "SEGUIEMJ.TTF"
 
 # ==================== 气泡区域（相对图片宽高的比例） ====================
 _BUBBLE_LEFT_RATIO = 0.05
@@ -42,7 +41,7 @@ _COMBINING_CODEPOINTS = frozenset({_ZWJ, _VS15, _VS16})
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
     if not FONT_PATH.exists():
         raise FileNotFoundError(
-            f"未找到字体，请将 msyh.ttc 放到 assets/fonts/ 目录"
+            f"未找到字体，请将 SEGUIEMJ.TTF 放到 assets/fonts/ 目录"
         )
     return ImageFont.truetype(str(FONT_PATH), size)
 
@@ -143,23 +142,23 @@ def _draw_motis(text: str) -> bytes:
     text_x = bubble_left + (bubble_w - max_line_w) / 2 + center_offset_x
     text_y = bubble_top + (bubble_h - total_h) / 2 + center_offset_y
 
+    draw = ImageDraw.Draw(base)
     fill = (0, 0, 0)
     stroke_w = max(1, font_size // 24)
 
-    with Pilmoji(base) as pmoji:
-        for line in lines:
-            if line:
-                lw = _measure_line(line, font, emoji_w)
-                lx = text_x + (max_line_w - lw) / 2
-                pmoji.text(
-                    (lx, text_y),
-                    line,
-                    font=font,
-                    fill=fill,
-                    stroke_width=stroke_w,
-                    stroke_fill=(255, 255, 255),
-                )
-            text_y += line_h
+    for line in lines:
+        if line:
+            lw = _measure_line(line, font, emoji_w)
+            lx = text_x + (max_line_w - lw) / 2
+            draw.text(
+                (lx, text_y),
+                line,
+                font=font,
+                fill=fill,
+                stroke_width=stroke_w,
+                stroke_fill=(255, 255, 255),
+            )
+        text_y += line_h
 
     buf = BytesIO()
     base.save(buf, format="PNG")

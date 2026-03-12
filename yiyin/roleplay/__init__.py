@@ -75,9 +75,9 @@ def _load_37_excerpts() -> str:
                         lines.append(content)
         except OSError:
             continue
-    # 去重并取前 50 条作为参考
+    # 去重并取前 25 条作为参考（过多会诱发模型输出设定）
     unique = list(dict.fromkeys(lines))
-    sample = unique[:50] if unique else []
+    sample = unique[:25] if unique else []
     return "\n".join(f"- {s}" for s in sample) if sample else ""
 
 
@@ -194,6 +194,31 @@ def _build_messages(
     return messages
 
 
+def _sanitize_reply(text: str) -> str:
+    """清洗模型输出，过滤掉设定泄露、元信息等异常内容"""
+    if not text or not text.strip():
+        return text
+    text = text.strip()
+    # 明显在输出设定/元信息，整段丢弃
+    if "37的设定" in text or "设定如下" in text or "【核心性格】" in text:
+        return ""
+    # 若整段以 prompt 中的【】块开头，说明模型在输出设定，丢弃
+    if re.match(r"^【[^】]+】", text):
+        return ""
+    # 若包含大量【】块（设定泄露），只保留第一个【之前的内容
+    bracket_count = len(re.findall(r"【[^】]+】", text))
+    if bracket_count >= 2:
+        first = re.split(r"【", text, 1)[0].strip()
+        if first and len(first) < 100:
+            return first
+        return ""
+    # 去掉开头的 "37：" 或 "37:"（模型有时会输出角色前缀）
+    text = re.sub(r"^37[：:]\s*", "", text)
+    # 去掉 "作为37，"、"设定：" 等元信息开头
+    text = re.sub(r"^(作为37[，,]?\s*|设定[：:]\s*)", "", text)
+    return text.strip()
+
+
 def _split_reply(text: str) -> list[str]:
     """按句号、问号、感叹号等标点分段，短句合并，避免『你好』『你好』式机械分段"""
     if not text or not text.strip():
@@ -290,6 +315,16 @@ async def handle_group_msg(bot: Bot, event: GroupMessageEvent):
             return
 
     reply = reply.strip().strip('"').strip("'")
+    # 清洗设定泄露等异常输出
+    sanitized = _sanitize_reply(reply)
+    if not sanitized and reply:
+        # 清洗后为空说明是设定泄露
+        if at_me:
+            reply = "唔……"
+        else:
+            return  # 随机参与时若输出异常则静默跳过
+    elif sanitized:
+        reply = sanitized
 
     # 记录自己的回复到历史（完整内容）
     _group_history[group_id].append({

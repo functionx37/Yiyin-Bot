@@ -15,7 +15,7 @@
 
 - **数据源**：`assets/documents/help.json`
   - 结构：模块名 `module` + 功能列表 `function`，每项含 `command`、`description`。
-- **流程**：读取 JSON → 遍历模块，为每个模块组装一段文本（模块名 + 各命令与描述）→ 用 `send_group_forward_msg` 发送多段节点，显示为 Bot 发出的「聊天记录」。
+- **流程**：读取 JSON → 遍历模块，为每个模块组装一段文本（模块名 + 各命令与描述）→ 用 `send_group_forward_msg` 发送多段节点，显示为 Bot 发出的『聊天记录』。
 - **依赖**：NoneBot OneBot V11 的 `GroupMessageEvent`、`MessageSegment`、`to_me` 规则。
 
 ---

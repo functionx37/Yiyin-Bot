@@ -24,7 +24,7 @@
 ### 结果组装
 
 - 解析返回 JSON 的 `queryresult.pods`，每个 pod 含 `title`、`subpods`（每项可有 `img.src`、`plaintext`）。
-- 构建多段「假聊天记录」节点，每段对应一个 pod，图文拼接后通过 `send_group_forward_msg`（群）或 `send_private_forward_msg`（私聊）发送。
+- 构建多段『假聊天记录』节点，每段对应一个 pod，图文拼接后通过 `send_group_forward_msg`（群）或 `send_private_forward_msg`（私聊）发送。
 
 ### 错误处理
 

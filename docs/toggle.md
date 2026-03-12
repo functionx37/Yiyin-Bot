@@ -18,7 +18,7 @@
 - **功能注册表**：`config/features.json`
   - `plugins`：默认启用，可按群禁用（如塔罗牌、群友语录、翻译等）。
   - `optin`：默认关闭，需在群内 `/启用`（如伪造消息）。
-  - `hidden`：默认关闭且不在功能列表中展示，需手动启用（如「世界通知」「摩诃」）。
+  - `hidden`：默认关闭且不在功能列表中展示，需手动启用（如『世界通知』『摩诃』）。
 - **运行时状态**：`data/toggle/config.json`
   - `disabled[group_id]`：该群已禁用的插件 key 列表。
   - `enabled[group_id]`：该群已启用的 opt-in/hidden 功能 key 列表。
@@ -35,10 +35,10 @@
 
 - **`is_feature_enabled(feature_key: str, group_id: str) -> bool`**
   - 供其他插件判断某 opt-in/hidden 功能是否在某群已启用。
-  - 例：塔罗牌中「世界通知」、摩诃 均通过此函数判断。
+  - 例：塔罗牌中『世界通知』、摩诃 均通过此函数判断。
 - **`is_plugin_enabled(plugin_key: str, group_id: str) -> bool`**
   - 供其他插件判断某 plugins 功能是否在某群已启用（默认启用，被禁用则返回 False）。
-  - 例：图片识别中「扫」「食物自动拾取」通过此函数判断是否执行后续处理。
+  - 例：自动食物收集中『食物自动拾取』通过此函数判断是否执行后续处理。
 
 ### 权限
 
@@ -51,4 +51,4 @@
 新插件若需纳入开关：
 
 - 默认启用、可被群禁用：在 `config/features.json` 的 `plugins` 中增加 `"模块名": "显示名"`。
-- 默认关闭、需群内启用：在 `optin` 或 `hidden` 中增加一项。`hidden` 不会在「功能列表」中显示名称。
+- 默认关闭、需群内启用：在 `optin` 或 `hidden` 中增加一项。`hidden` 不会在『功能列表』中显示名称。

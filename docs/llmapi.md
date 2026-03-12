@@ -31,7 +31,7 @@
 
 - **`describe_image(prompt, image_url, *, model=..., max_tokens=..., timeout=...) -> str | None`**
   - 使用 Vision 模型理解图片并返回文本描述。
-  - **prompt**：对图片的提问（如「简短描述这张图」）。
+  - **prompt**：对图片的提问（如『简短描述这张图』）。
   - **image_url**：图片 URL，需公网可访问（jpeg/png/gif/webp）。
   - **model**：默认 `gpt-4o-mini`。
   - **返回值**：模型描述文本，失败返回 `None`。

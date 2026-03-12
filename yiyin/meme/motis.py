@@ -27,8 +27,11 @@ _BUBBLE_HEIGHT_RATIO = 0.22
 _BUBBLE_PADDING = 0.03
 
 _FONT_SIZE_MIN = 14
-_FONT_SIZE_MAX = 72
+_FONT_SIZE_MAX = 96
 _LINE_SPACING = 1.2
+# 文字中心相对气泡几何中心的偏移（右移、下移）
+_CENTER_OFFSET_X_RATIO = 0.02
+_CENTER_OFFSET_Y_RATIO = 0.02
 
 _ZWJ = 0x200D
 _VS15 = 0xFE0E
@@ -135,8 +138,10 @@ def _draw_motis(text: str) -> bytes:
         _measure_line(ln if ln else " ", font, emoji_w) for ln in lines
     )
 
-    text_x = bubble_left + (bubble_w - max_line_w) / 2
-    text_y = bubble_top + (bubble_h - total_h) / 2
+    center_offset_x = int(w * _CENTER_OFFSET_X_RATIO)
+    center_offset_y = int(h * _CENTER_OFFSET_Y_RATIO)
+    text_x = bubble_left + (bubble_w - max_line_w) / 2 + center_offset_x
+    text_y = bubble_top + (bubble_h - total_h) / 2 + center_offset_y
 
     fill = (0, 0, 0)
     stroke_w = max(1, font_size // 24)
@@ -169,7 +174,10 @@ xiang_cmd = on_command("想", priority=10, block=True)
 async def handle_xiang(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     raw = args.extract_plain_text().strip()
     if not raw:
-        await xiang_cmd.finish("用法：/想 <文本>\n在气泡中填入你想说的话，支持 emoji")
+        await xiang_cmd.finish(
+            "用法：/想 <文本>\n"
+            "在 motis 左上角气泡中填入文字，支持 emoji，自动调整字号与换行"
+        )
     try:
         out_bytes = _draw_motis(raw)
     except FileNotFoundError as e:

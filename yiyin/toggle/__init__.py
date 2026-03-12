@@ -98,7 +98,7 @@ def is_feature_enabled(feature_key: str, group_id: str) -> bool:
 
     供其他插件调用，例如：
         from yiyin.toggle import is_feature_enabled
-        if is_feature_enabled("world_notify", group_id): ...
+        if is_feature_enabled("some_feature", group_id): ...
     """
     config = _load_config()
     enabled_list = config.get("enabled", {}).get(group_id, [])

@@ -86,7 +86,7 @@ Yiyin-Bot/
 | toggle | [toggle.md](toggle.md) | 功能列表/启用/禁用与预处理器 |
 | tarot | [tarot.md](tarot.md) | 塔罗牌抽牌、十连、占卜、世界通知 |
 | quotes | [quotes.md](quotes.md) | 群友语录与聊天截图生成 |
-| food | [food.md](food.md) | 食物图鉴与「吃什么」 |
+| food | [food.md](food.md) | 食物图鉴与『吃什么』 |
 | magazine | [magazine.md](magazine.md) | 群刊（语录+食物合并转发，每群每日一次） |
 | meme | [meme.md](meme.md) | 对称图、强强模板等表情包 |
 | translate | [translate.md](translate.md) | 腾讯云翻译与对外接口 |

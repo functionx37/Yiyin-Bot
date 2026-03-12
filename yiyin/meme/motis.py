@@ -10,6 +10,7 @@ from pathlib import Path
 
 from PIL import Image, ImageFont
 from pilmoji import Pilmoji
+from pilmoji.helpers import Node, NodeType, to_nodes
 
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
@@ -33,11 +34,6 @@ _LINE_SPACING = 1.2
 _CENTER_OFFSET_X_RATIO = 0.04
 _CENTER_OFFSET_Y_RATIO = 0.05
 
-_ZWJ = 0x200D
-_VS15 = 0xFE0E
-_VS16 = 0xFE0F
-_COMBINING_CODEPOINTS = frozenset({_ZWJ, _VS15, _VS16})
-
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
     if not FONT_PATH.exists():
@@ -47,49 +43,87 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(FONT_PATH), size)
 
 
-def _char_width(ch: str, font: ImageFont.FreeTypeFont, emoji_w: float) -> float:
-    """获取单个字符的渲染宽度。
-    对 ZWJ / 变体选择符返回 0；对字体中缺失的非 ASCII 字符按 emoji 宽度估算。"""
-    cp = ord(ch)
-    if cp in _COMBINING_CODEPOINTS or 0xE0020 <= cp <= 0xE007F:
-        return 0
-    w = font.getlength(ch)
-    if w < 1 and cp > 255:
-        return emoji_w
-    return w
-
-
-def _measure_line(
-    line: str, font: ImageFont.FreeTypeFont, emoji_w: float
+def _measure_line_pilmoji(
+    line: str,
+    font: ImageFont.FreeTypeFont,
+    emoji_scale_factor: float = 1.0,
+    node_spacing: int = 0,
 ) -> float:
-    return sum(_char_width(ch, font, emoji_w) for ch in line)
+    """与 Pilmoji 渲染逻辑一致的行宽测量（使用空格占位计算）。"""
+    line_nodes = to_nodes(line)
+    if not line_nodes:
+        return 0.0
+    nodes = line_nodes[0]
+    space_len = font.getlength(" ")
+    if space_len <= 0:
+        space_len = float(font.size) / 2
+    text_parts: list[str] = []
+    for node in nodes:
+        if node.type == NodeType.text:
+            text_parts.append(node.content)
+        else:
+            w = round(emoji_scale_factor * font.size)
+            size = round(w + node_spacing * 2)
+            n_spaces = max(1, round(size / space_len))
+            text_parts.append(" " * n_spaces)
+    return font.getlength("".join(text_parts))
 
 
 def _wrap_text(
     text: str,
     font: ImageFont.FreeTypeFont,
     max_width: float,
-    emoji_w: float,
+    emoji_scale_factor: float = 1.0,
 ) -> list[str]:
+    """按行换行，使用 Pilmoji 风格测量。"""
     lines: list[str] = []
     for para in text.split("\n"):
         if not para:
             lines.append("")
             continue
-        buf = ""
+        parsed = to_nodes(para)
+        if not parsed:
+            lines.append("")
+            continue
+        line_nodes = parsed[0]
+        buf_nodes: list = []
         cur_w = 0.0
-        for ch in para:
-            cw = _char_width(ch, font, emoji_w)
-            if cur_w + cw > max_width:
-                if buf:
-                    lines.append(buf)
-                buf = ch
-                cur_w = cw
+        space_len = font.getlength(" ")
+        if space_len <= 0:
+            space_len = float(font.size) / 2
+
+        def _node_width(node) -> float:
+            if node.type == NodeType.text:
+                return font.getlength(node.content)
+            w = round(emoji_scale_factor * font.size)
+            n_spaces = max(1, round((w + 0) / space_len))
+            return font.getlength(" " * n_spaces)
+
+        def _flush():
+            if buf_nodes:
+                lines.append("".join(n.content for n in buf_nodes))
+                buf_nodes.clear()
+
+        for node in line_nodes:
+            nw = _node_width(node)
+            if node.type == NodeType.text and nw > max_width:
+                _flush()
+                for ch in node.content:
+                    cw = font.getlength(ch) if font.getlength(ch) >= 1 else float(font.size)
+                    if cur_w + cw > max_width and buf_nodes:
+                        _flush()
+                        cur_w = 0.0
+                    buf_nodes.append(Node(NodeType.text, ch))
+                    cur_w += cw
+            elif cur_w + nw > max_width and buf_nodes:
+                _flush()
+                cur_w = 0.0
+                buf_nodes.append(node)
+                cur_w = nw
             else:
-                buf += ch
-                cur_w += cw
-        if buf:
-            lines.append(buf)
+                buf_nodes.append(node)
+                cur_w += nw
+        _flush()
     return lines or [""]
 
 
@@ -115,18 +149,16 @@ def _draw_motis(text: str) -> bytes:
     font_size = _FONT_SIZE_MAX
     lines: list[str] = []
     font = _get_font(font_size)
-    emoji_w = float(font_size)
 
     for size in range(_FONT_SIZE_MAX, _FONT_SIZE_MIN - 1, -2):
         font = _get_font(size)
-        emoji_w = float(size)
-        lines = _wrap_text(text, font, bubble_w, emoji_w)
+        lines = _wrap_text(text, font, bubble_w)
 
         ascent, descent = font.getmetrics()
         line_h = int((ascent + descent) * _LINE_SPACING)
         total_h = line_h * len(lines)
         max_line_w = max(
-            _measure_line(ln if ln else " ", font, emoji_w) for ln in lines
+            _measure_line_pilmoji(ln if ln else " ", font) for ln in lines
         )
 
         if total_h <= bubble_h and max_line_w <= bubble_w:
@@ -135,14 +167,13 @@ def _draw_motis(text: str) -> bytes:
     else:
         font_size = _FONT_SIZE_MIN
         font = _get_font(font_size)
-        emoji_w = float(font_size)
-        lines = _wrap_text(text, font, bubble_w, emoji_w)
+        lines = _wrap_text(text, font, bubble_w)
 
     ascent, descent = font.getmetrics()
     line_h = int((ascent + descent) * _LINE_SPACING)
     total_h = line_h * len(lines)
     max_line_w = max(
-        _measure_line(ln if ln else " ", font, emoji_w) for ln in lines
+        _measure_line_pilmoji(ln if ln else " ", font) for ln in lines
     )
 
     center_offset_x = int(w * _CENTER_OFFSET_X_RATIO)
@@ -156,7 +187,7 @@ def _draw_motis(text: str) -> bytes:
     with Pilmoji(base) as pmoji:
         for line in lines:
             if line:
-                lw = _measure_line(line, font, emoji_w)
+                lw = _measure_line_pilmoji(line, font)
                 lx = text_x + (max_line_w - lw) / 2
                 pmoji.text(
                     (lx, text_y),
@@ -165,6 +196,7 @@ def _draw_motis(text: str) -> bytes:
                     fill=fill,
                     stroke_width=stroke_w,
                     stroke_fill=(255, 255, 255),
+                    anchor="lt",
                 )
             text_y += line_h
 

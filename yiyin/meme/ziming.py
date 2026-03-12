@@ -16,7 +16,7 @@ from nonebot.params import CommandArg
 
 # ==================== 资源路径 ====================
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-BIBI_IMAGE_PATH = _PROJECT_ROOT / "assets" / "images" / "ziming" / "bibi.jpg"
+BIBI_IMAGE_PATH = _PROJECT_ROOT / "assets" / "images" / "meme" / "bibi.jpg"
 
 # ==================== 字体（微软雅黑，项目内 assets/fonts/） ====================
 # 使用加粗体 msyhbd.ttc，无自带加粗则用 msyh.ttc

@@ -2,16 +2,20 @@
     "plugins": {
         "tarot": "塔罗牌",
         "quotes": "群友语录",
-        "yiyin.meme.symmetric": "对称",
-        "yiyin.meme.ziming": "强强",
+        "meme": "随机表情",
         "translate": "翻译",
         "choose": "随机选择",
-        "nonebot_plugin_memes": "随机表情",
-        "nonebot_plugin_emojimix": "Emoji合成",
         "emoji_reaction": "贴表情",
         "food": "食物图鉴",
         "msg_withdraw": "消息撤回",
         "nonebot_plugin_fakemsg": "伪造消息"
+    },
+    "plugin_groups": {
+        "meme": [
+            "meme",
+            "nonebot_plugin_memes",
+            "nonebot_plugin_emojimix"
+        ]
     },
     "hidden": {
         "roleplay": "角色扮演",

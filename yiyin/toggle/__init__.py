@@ -33,14 +33,22 @@ FEATURES_PATH = PROJECT_ROOT / "config" / "features.json"
 
 # ==================== 从外部配置加载功能注册表 ====================
 # config/features.json 中：
-#   "plugins" — 默认启用可禁用的插件
-#   "hidden"  — 默认关闭需手动启用，且不在功能列表和提示中展示
+#   "plugins"       — 默认启用可禁用的插件
+#   "plugin_groups" — 插件组：一个显示名对应多个子插件（如 随机表情 = 对称+强强+随机表情+Emoji合成）
+#   "hidden"        — 默认关闭需手动启用，且不在功能列表和提示中展示
 # 新增插件时，编辑 config/features.json 即可纳入开关管理
 with open(FEATURES_PATH, "r", encoding="utf-8") as _f:
     _features = json.load(_f)
 
 PLUGIN_REGISTRY: dict[str, str] = _features.get("plugins", {})
+PLUGIN_GROUPS: dict[str, list[str]] = _features.get("plugin_groups", {})
 HIDDEN_REGISTRY: dict[str, str] = _features.get("hidden", {})
+
+# 子插件 -> 所属组：用于将对称/强强/随机表情/Emoji合成 等映射到「随机表情」组
+_MEMBER_TO_GROUP: dict[str, str] = {}
+for group_key, members in PLUGIN_GROUPS.items():
+    for m in members:
+        _MEMBER_TO_GROUP[m] = group_key
 
 # 反向映射：中文功能名 -> 模块名 / 功能标识（用于命令参数解析）
 _DISPLAY_TO_MODULE: dict[str, str] = {v: k for k, v in PLUGIN_REGISTRY.items()}
@@ -81,10 +89,17 @@ def _save_config(config: dict) -> None:
 
 
 def _is_disabled(plugin_key: str, group_id: str) -> bool:
-    """检查指定插件是否在指定群被禁用"""
+    """检查指定插件（或插件组）是否在指定群被禁用"""
     config = _load_config()
     disabled_list = config.get("disabled", {}).get(group_id, [])
-    return plugin_key in disabled_list
+    if plugin_key in disabled_list:
+        return True
+    # 若为插件组，检查其成员是否被禁用（兼容旧配置）
+    if plugin_key in PLUGIN_GROUPS:
+        for member in PLUGIN_GROUPS[plugin_key]:
+            if member in disabled_list:
+                return True
+    return False
 
 
 def is_feature_enabled(feature_key: str, group_id: str) -> bool:
@@ -115,15 +130,20 @@ def _get_plugin_key(matcher: Matcher) -> str | None:
     """从 Matcher 提取插件模块名（兼容内置插件与外部插件）
 
     匹配优先级：
-    1. 全名直接匹配（如 nonebot_plugin_memes）
-    2. 子插件前缀匹配（如 nonebot_plugin_memes.utils → nonebot_plugin_memes）
-    3. 对于 yiyin.meme，从 handler 的 __module__ 区分对称/强强
-    4. 取最后一段匹配（如 yiyin.tarot → tarot）
+    1. 外部插件名若在 plugin_groups 中，直接返回组键（如 nonebot_plugin_memes → random_emotion）
+    2. 对于 yiyin.meme，从 handler 的 __module__ 区分对称/强强，再映射到组
+    3. 全名直接匹配
+    4. 子插件前缀匹配
+    5. 取最后一段匹配
     """
     plugin = matcher.plugin
     if plugin is None:
         return None
     name = plugin.name
+
+    # 外部插件若属于某组，直接返回组键
+    if name in _MEMBER_TO_GROUP:
+        return _MEMBER_TO_GROUP[name]
 
     # 对于 yiyin.meme 的子功能，从 handler 的 __module__ 区分对称/强强
     if name == "yiyin.meme" and matcher.handlers:
@@ -131,9 +151,9 @@ def _get_plugin_key(matcher: Matcher) -> str | None:
         if hasattr(handler, "__module__"):
             mod = handler.__module__ or ""
             if "symmetric" in mod:
-                return "yiyin.meme.symmetric"
+                return _MEMBER_TO_GROUP.get("yiyin.meme.symmetric", "yiyin.meme.symmetric")
             if "ziming" in mod:
-                return "yiyin.meme.ziming"
+                return _MEMBER_TO_GROUP.get("yiyin.meme.ziming", "yiyin.meme.ziming")
 
     _all_keys = PLUGIN_REGISTRY | HIDDEN_REGISTRY
     if name in _all_keys:
@@ -201,13 +221,10 @@ disable_cmd = on_command(
 async def handle_list(bot: Bot, event: GroupMessageEvent):
     """处理 /功能列表 命令：展示本群所有功能的启用状态"""
     group_id = str(event.group_id)
-    config = _load_config()
-    disabled = config.get("disabled", {}).get(group_id, [])
-    enabled = config.get("enabled", {}).get(group_id, [])
 
     lines = ["『本群功能状态』", ""]
     for key, display_name in PLUGIN_REGISTRY.items():
-        status = "❌ 已禁用" if key in disabled else "✅ 已启用"
+        status = "❌ 已禁用" if _is_disabled(key, group_id) else "✅ 已启用"
         lines.append(f"  {display_name}  {status}")
 
     lines.append("")
@@ -241,11 +258,16 @@ async def handle_enable(
     config = _load_config()
 
     if module_key:
-        # 默认开：从 disabled 列表中移除
+        # 默认开：从 disabled 列表中移除（若为插件组，同时移除其成员）
         disabled = config.get("disabled", {}).get(group_id, [])
-        if module_key not in disabled:
+        keys_to_remove = [module_key]
+        if module_key in PLUGIN_GROUPS:
+            keys_to_remove.extend(PLUGIN_GROUPS[module_key])
+        to_remove = [k for k in keys_to_remove if k in disabled]
+        if not to_remove:
             await enable_cmd.finish(f"功能『{name}』在本群已经是启用状态")
-        disabled.remove(module_key)
+        for k in to_remove:
+            disabled.remove(k)
         if not disabled:
             config["disabled"].pop(group_id, None)
         else:

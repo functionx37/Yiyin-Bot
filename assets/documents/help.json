@@ -138,15 +138,6 @@
         ]
     },
     {
-        "module": "数学求解",
-        "function": [
-            {
-                "command": "/算 <问题描述>",
-                "description": "求解数学问题"
-            }
-        ]
-    },
-    {
         "module": "随机选择",
         "function": [
             {
@@ -189,20 +180,11 @@
             },
             {
                 "command": "/发 <ID>",
-                "description": "发送对应ID的QQ系统表情"
+                "description": "发送对应ID的表情"
             },
             {
                 "command": "/发 随机",
-                "description": "随机发送一个QQ系统表情"
-            }
-        ]
-    },
-    {
-        "module": "动漫/Gal识别",
-        "function": [
-            {
-                "command": "#识别/角色/人物 (动漫/gal) [图片]",
-                "description": "识别图中角色"
+                "description": "随机发送一个表情"
             }
         ]
     },

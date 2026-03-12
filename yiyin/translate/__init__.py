@@ -177,7 +177,7 @@ async def handle_translate(event: MessageEvent, args: Message = CommandArg()):
     if not target:
         supported = "、".join(LANG_DISPLAY.values())
         await translate_cmd.finish(
-            f"不支持的目标语言「{lang_input}」\n支持的语言：{supported}"
+            f"不支持的目标语言『{lang_input}』\n支持的语言：{supported}"
         )
 
     # 优先使用命令参数中的文本，其次从引用消息中提取

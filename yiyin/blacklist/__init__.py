@@ -159,7 +159,7 @@ async def handle_list(
         await list_blacklist_cmd.finish("黑名单为空")
 
     ids = sorted(blacklist)
-    lines = ["「黑名单」", ""] + [f"  • {uid}" for uid in ids]
+    lines = ["『黑名单』", ""] + [f"  • {uid}" for uid in ids]
     lines.append("")
     lines.append("管理员可使用：")
     lines.append("  /拉黑 <QQ号>")

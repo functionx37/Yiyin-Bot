@@ -5,7 +5,7 @@ NoneBot2 群友语录插件
 - 命令：/群友列表
 - 命令：/上传 <群友昵称> [图片]（支持多张图片含引用，依次处理；出错回滚）
 - 命令：/截图上传 <群友昵称> [引用消息]
-- 命令：/查看 <群友昵称>（以合并转发发送该群友全部语录，格式「ID」【对应截图】）
+- 命令：/查看 <群友昵称>（以合并转发发送该群友全部语录，格式『ID』）
 - 命令：/随机群友 [昵称]（等概率随机一个有语录的群友再随机一条；指定昵称则从该群友语录中随机）
 - 命令：/随机语录（从本群全部语录中随机抽取一条）
 - 命令：/随机精华（从群精华消息中随机抽一条，格式：昵称：内容）
@@ -286,14 +286,14 @@ upload_cmd = on_command("上传", priority=10, block=True)
 
 
 def _upload_image_first_rule(event: GroupMessageEvent) -> bool:
-    """仅当消息首段为非文本（如图片）且包含上传命令时触发，用于支持「图片在上指令在下」"""
+    """仅当消息首段为非文本（如图片）且包含上传命令时触发，用于支持『图片在上指令在下』"""
     msg = event.get_message()
     if not msg or msg[0].is_text():
         return False  # 首段是文本时由 on_command 处理
     text = msg.extract_plain_text().strip()
     if not text:
         return False
-    # 匹配 /上传 或 .上传 等，排除「截图上传」
+    # 匹配 /上传 或 .上传 等，排除『截图上传』
     if not re.search(r"[/.\!！]上传(?:\s|$)", text):
         return False
     # 消息中需有图片或引用含图
@@ -339,17 +339,17 @@ async def handle_add_member(
     members = _load_members(group_id)
 
     if name in members:
-        await add_member_cmd.finish(f"群友「{name}」已存在，无需重复添加")
+        await add_member_cmd.finish(f"群友『{name}』已存在，无需重复添加")
 
     aliases = _load_aliases(group_id)
     if name in aliases:
         await add_member_cmd.finish(
-            f"「{name}」已被用作群友「{aliases[name]}」的别名，不能再作为主昵称"
+            f"『{name}』已被用作群友『{aliases[name]}』的别名，不能再作为主昵称"
         )
 
     members.append(name)
     _save_members(group_id, members)
-    await add_member_cmd.finish(f"已成功添加群友「{name}」✓")
+    await add_member_cmd.finish(f"已成功添加群友『{name}』✓")
 
 
 def _merge_member_quotes_into(
@@ -404,7 +404,7 @@ async def handle_add_alias(
 
     if not canonical:
         await add_alias_cmd.finish(
-            f"群友「{existing_name}」不存在，请先使用 /新增群友 {existing_name} 添加"
+            f"群友『{existing_name}』不存在，请先使用 /新增群友 {existing_name} 添加"
         )
 
     if canonical == alias:
@@ -415,7 +415,7 @@ async def handle_add_alias(
 
     if alias in aliases:
         await add_alias_cmd.finish(
-            f"「{alias}」已是群友「{aliases[alias]}」的别名"
+            f"『{alias}』已是群友『{aliases[alias]}』的别名"
         )
 
     if alias in members:
@@ -434,15 +434,15 @@ async def handle_add_alias(
         if alias in deleted:
             deleted.discard(alias)
             _save_deleted_members(group_id, deleted)
-        msg = f"已将群友「{alias}」设为「{canonical}」的别名"
+        msg = f"已将群友『{alias}』设为『{canonical}』的别名"
         if moved > 0:
-            msg += f"，并合并了 {moved} 条语录到「{canonical}」"
+            msg += f"，并合并了 {moved} 条语录到『{canonical}』"
         await add_alias_cmd.finish(msg + "✓")
     else:
         # B 不是主昵称：常规添加别名
         aliases[alias] = canonical
         _save_aliases(group_id, aliases)
-        await add_alias_cmd.finish(f"已为群友「{canonical}」添加别名「{alias}」✓")
+        await add_alias_cmd.finish(f"已为群友『{canonical}』添加别名『{alias}』✓")
 
 
 @list_members_cmd.handle()
@@ -512,7 +512,7 @@ async def _do_upload(
     deleted = _load_deleted_members(group_id)
     canonical = _resolve_name(group_id, name, exclude_deleted=False)
     if canonical and canonical in deleted:
-        await matcher.finish(f"群友「{canonical}」已被删除，无法上传")
+        await matcher.finish(f"群友『{canonical}』已被删除，无法上传")
 
     auto_registered = False
     if not canonical:
@@ -580,10 +580,10 @@ async def _do_upload(
             _save_members(group_id, members)
         await matcher.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
-    prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
+    prefix = f"群友『{canonical}』已自动注册，" if auto_registered else ""
     id_str = "、".join(sid for sid, _ in downloaded)
     await matcher.finish(
-        f"{prefix}已成功为群友「{canonical}」保存 {len(downloaded)} 张语录截图✓\n"
+        f"{prefix}已成功为群友『{canonical}』保存 {len(downloaded)} 张语录截图✓\n"
         f"语录ID：{id_str}"
     )
 
@@ -599,7 +599,7 @@ async def handle_upload(
 
 @upload_image_first_cmd.handle()
 async def handle_upload_image_first(bot: Bot, event: GroupMessageEvent):
-    """处理「图片在上、指令在下」的 /上传：NoneBot 命令匹配首段须为文本，首段为图时需额外处理"""
+    """处理『图片在上、指令在下』的 /上传：NoneBot 命令匹配首段须为文本，首段为图时需额外处理"""
     msg = event.get_message()
     text = msg.extract_plain_text().strip()
     m = re.search(r"[/.\!！]上传\s*(.*)", text)
@@ -609,12 +609,12 @@ async def handle_upload_image_first(bot: Bot, event: GroupMessageEvent):
 
 # 从消息文本中解析语录 ID 的正则
 _QUOTE_ID_PREFIX_RE = re.compile(r"语录ID[：:]\s*([A-Za-z0-9]+(?:\s*[、]\s*[A-Za-z0-9]+)*)")
-_QUOTE_LABEL_RE = re.compile(r"「([A-Za-z0-9]+)」【对应截图】")
+_QUOTE_LABEL_RE = re.compile(r"『([A-Za-z0-9]+)』(?:【对应截图】)?")
 _QUOTE_ID_HINT_RE = re.compile(r"[（(]ID[：:]\s*([A-Za-z0-9]+)[）)]")
 
 
 def _parse_quote_ids_from_text(text: str) -> list[str]:
-    """从消息文本中解析语录 ID 列表。支持格式：语录ID：xxx、yyy；「id」【对应截图】；（ID：xxx）"""
+    """从消息文本中解析语录 ID 列表。支持格式：语录ID：xxx、yyy；『id』；（ID：xxx）"""
     ids: list[str] = []
     # 1. 语录ID：Ab3x9K 或 语录ID：Ab3x9K、Bc4y2L
     m = _QUOTE_ID_PREFIX_RE.search(text)
@@ -624,7 +624,7 @@ def _parse_quote_ids_from_text(text: str) -> list[str]:
             sid = sid.strip()
             if sid and sid not in ids:
                 ids.append(sid)
-    # 2. 「id」【对应截图】格式
+    # 2. 『id』格式（兼容旧格式『id』【对应截图】）
     for m in _QUOTE_LABEL_RE.finditer(text):
         sid = m.group(1).strip()
         if sid and sid not in ids:
@@ -759,7 +759,7 @@ async def handle_screenshot_upload(
     deleted = _load_deleted_members(group_id)
     canonical = _resolve_name(group_id, name, exclude_deleted=False)
     if canonical and canonical in deleted:
-        await screenshot_upload_cmd.finish(f"群友「{canonical}」已被删除，无法上传")
+        await screenshot_upload_cmd.finish(f"群友『{canonical}』已被删除，无法上传")
 
     auto_registered = False
     if not canonical:
@@ -787,9 +787,9 @@ async def handle_screenshot_upload(
             _save_members(group_id, members)
         await screenshot_upload_cmd.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
-    prefix = f"群友「{canonical}」已自动注册，" if auto_registered else ""
+    prefix = f"群友『{canonical}』已自动注册，" if auto_registered else ""
     msg = MessageSegment.text(
-        f"{prefix}已为群友「{canonical}」生成并保存截图✓\n语录ID：{short_id}\n"
+        f"{prefix}已为群友『{canonical}』生成并保存截图✓\n语录ID：{short_id}\n"
     ) + MessageSegment.image(screenshot_bytes)
     await screenshot_upload_cmd.finish(msg)
 
@@ -815,7 +815,7 @@ def _make_forward_node(name: str, uin: str, content: Message) -> dict:
 async def handle_view(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /查看 命令：以合并转发形式发送该群友的全部语录，格式为「ID」【对应截图】"""
+    """处理 /查看 命令：以合并转发形式发送该群友的全部语录，格式为『ID』"""
     name = args.extract_plain_text().strip()
     if not name:
         await view_cmd.finish("请输入群友昵称，例如：/查看 小明")
@@ -825,7 +825,7 @@ async def handle_view(
 
     if not canonical:
         await view_cmd.finish(
-            f"群友「{name}」不存在，请先使用 /新增群友 {name} 添加"
+            f"群友『{name}』不存在，请先使用 /新增群友 {name} 添加"
         )
 
     index = _load_index(group_id)
@@ -836,7 +836,7 @@ async def handle_view(
     ]
     if not member_entries:
         await view_cmd.finish(
-            f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
+            f"群友『{canonical}』还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
         )
 
     try:
@@ -861,13 +861,13 @@ async def handle_view(
             logger.exception(f"读取语录图片失败: {filepath}")
             continue
         content = Message(
-            MessageSegment.text(f"「{short_id}」【对应截图】\n")
+            MessageSegment.text(f"『{short_id}』\n")
         ) + img_seg
         nodes.append(_make_forward_node(bot_name, bot_uin, content))
 
     if not nodes:
         await view_cmd.finish(
-            f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
+            f"群友『{canonical}』还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
         )
 
     chunk_size = 200
@@ -890,17 +890,17 @@ async def handle_random_member(
         canonical = _resolve_name(group_id, name_arg, exclude_deleted=True)
         if not canonical:
             await random_member_cmd.finish(
-                f"群友「{name_arg}」不存在，请先使用 /新增群友 {name_arg} 添加"
+                f"群友『{name_arg}』不存在，请先使用 /新增群友 {name_arg} 添加"
             )
         image_dir = _get_member_image_dir(group_id, canonical)
         if not image_dir.exists():
             await random_member_cmd.finish(
-                f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
+                f"群友『{canonical}』还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
             )
         image_files = list(image_dir.glob("*.*"))
         if not image_files:
             await random_member_cmd.finish(
-                f"群友「{canonical}」还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
+                f"群友『{canonical}』还没有语录记录，使用 /上传 {canonical} [图片] 来添加吧"
             )
         chosen_name = canonical
         chosen_file = random.choice(image_files)
@@ -920,7 +920,7 @@ async def handle_random_member(
     short_id = _id_from_image_path(group_id, chosen_name, chosen_file)
     id_hint = f"（ID：{short_id}）" if short_id else ""
     msg = MessageSegment.text(
-        f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
+        f"随机抽到了群友『{chosen_name}』的语录{id_hint}：\n"
     ) + MessageSegment.image(image_bytes)
     await random_member_cmd.finish(msg)
 
@@ -957,7 +957,7 @@ async def handle_random_quote(bot: Bot, event: GroupMessageEvent):
     short_id = _id_from_image_path(group_id, chosen_name, chosen_file)
     id_hint = f"（ID：{short_id}）" if short_id else ""
     msg = MessageSegment.text(
-        f"随机抽到了群友「{chosen_name}」的语录{id_hint}：\n"
+        f"随机抽到了群友『{chosen_name}』的语录{id_hint}：\n"
     ) + MessageSegment.image(image_bytes)
     await random_quote_cmd.finish(msg)
 
@@ -1054,7 +1054,7 @@ async def handle_delete_quote(
     index = _load_index(group_id)
 
     if quote_id not in index:
-        await delete_quote_cmd.finish(f"语录ID「{quote_id}」不存在，请检查后重试")
+        await delete_quote_cmd.finish(f"语录ID『{quote_id}』不存在，请检查后重试")
 
     entry = index[quote_id]
     member = entry["member"]
@@ -1067,7 +1067,7 @@ async def handle_delete_quote(
     _save_index(group_id, index)
 
     await delete_quote_cmd.finish(
-        f"已删除群友「{member}」的语录（ID：{quote_id}）✓"
+        f"已删除群友『{member}』的语录（ID：{quote_id}）✓"
     )
 
 
@@ -1086,15 +1086,15 @@ async def handle_delete_member(
     canonical = _resolve_name(group_id, name, exclude_deleted=False)
     if not canonical:
         await delete_member_cmd.finish(
-            f"群友「{name}」不存在，请检查昵称或别名后重试"
+            f"群友『{name}』不存在，请检查昵称或别名后重试"
         )
 
     deleted = _load_deleted_members(group_id)
     if canonical in deleted:
-        await delete_member_cmd.finish(f"群友「{canonical}」已被标记删除")
+        await delete_member_cmd.finish(f"群友『{canonical}』已被标记删除")
 
     deleted.add(canonical)
     _save_deleted_members(group_id, deleted)
     await delete_member_cmd.finish(
-        f"已为群友「{canonical}」打上删除标记，此后所有调用不再显示✓"
+        f"已为群友『{canonical}』打上删除标记，此后所有调用不再显示✓"
     )

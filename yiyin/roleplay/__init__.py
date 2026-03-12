@@ -195,7 +195,7 @@ def _build_messages(
 
 
 def _split_reply(text: str) -> list[str]:
-    """按句号、问号、感叹号等标点分段，短句合并，避免「你好」「你好」式机械分段"""
+    """按句号、问号、感叹号等标点分段，短句合并，避免『你好』『你好』式机械分段"""
     if not text or not text.strip():
         return []
     text = text.strip()
@@ -217,7 +217,7 @@ def _split_reply(text: str) -> list[str]:
             buf += p
     if buf.strip():
         raw.append(buf.strip())
-    # 短句（≤8 字）合并到下一句，避免「你好。」「你好。」拆成两条
+    # 短句（≤8 字）合并到下一句，避免『你好。』『你好。』拆成两条
     merged: list[str] = []
     i = 0
     while i < len(raw):

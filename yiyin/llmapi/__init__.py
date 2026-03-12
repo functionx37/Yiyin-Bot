@@ -161,7 +161,7 @@ async def describe_image(
     云雾 API 识图文档：https://yunwu.apifox.cn/ （创建聊天识图）
 
     Args:
-        prompt: 对图片的提问或指令（如「简短描述这张图」）
+        prompt: 对图片的提问或指令（如『简短描述这张图』）
         image_url: 图片 URL，需公网可访问（支持 jpeg/png/gif/webp）
         model: Vision 模型，默认 gpt-4o-mini
         max_tokens: 最大生成 token 数

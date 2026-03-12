@@ -1,7 +1,7 @@
 """
 NoneBot2 随机选择插件
 - 命令：/选 <选项1>还是<选项2>[还是<选项3>...]
-- 选项可用「还是」、空格、/ 分隔
+- 选项可用『还是』、空格、/ 分隔
 - 功能：从给定的多个选项中随机选择一个；特判规则见 config/choose_special.jsonl（一行一条）
 
 规则格式：每条 rule 为 condition + answer。condition 可为：
@@ -94,7 +94,7 @@ async def handle_choose(event: MessageEvent, args: Message = CommandArg()):
     if not raw:
         await choose_cmd.finish(
             "用法：/选 <选项1>还是<选项2>[还是<选项3>...]\n"
-            "选项可用「还是」、空格、/ 分隔\n"
+            "选项可用『还是』、空格、/ 分隔\n"
             "示例：/选 火锅还是烧烤还是麻辣烫  或  /选 甜豆花/咸豆花"
         )
 
@@ -102,7 +102,7 @@ async def handle_choose(event: MessageEvent, args: Message = CommandArg()):
 
     if len(options) < 2:
         await choose_cmd.finish(
-            "至少需要两个选项哦，用「还是」、空格或 / 分隔\n"
+            "至少需要两个选项哦，用『还是』、空格或 / 分隔\n"
             "示例：/选 火锅还是烧烤  或  /选 甜豆花 咸豆花"
         )
 

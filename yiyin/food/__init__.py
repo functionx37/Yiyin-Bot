@@ -7,7 +7,7 @@ NoneBot2 食物图鉴插件（按群隔离）
 - 命令：/吃 <id/名字/tag> — 支持引用食物消息自动提取 ID
 - 命令：/隐藏 <id> — 将普通食物设为隐藏食物，支持引用食物消息自动提取 ID
 - 命令：/吃大餐 [数量] — 默认三道菜，最多十道
-- 触发：有人发「吃什么」时回复「是啊，吃什么」并随机一张图请你吃（单抽有概率触发隐藏食物）
+- 触发：有人发『吃什么』时回复『是啊，吃什么』并随机一张图请你吃（单抽有概率触发隐藏食物）
 """
 
 import asyncio
@@ -245,7 +245,7 @@ def _resolve_id_or_name(
             matched.append(sid)
 
     if not matched:
-        return None, f"未找到名为「{key}」或ID为「{key}」的食物"
+        return None, f"未找到名为『{key}』或ID为『{key}』的食物"
 
     if len(matched) == 1:
         return matched, None
@@ -254,7 +254,7 @@ def _resolve_id_or_name(
     if allow_dup:
         return matched, None
     ids_text = "\n".join(matched)
-    return None, f"「{key}」对应的记录有：\n{ids_text}\n请使用id操作。"
+    return None, f"『{key}』对应的记录有：\n{ids_text}\n请使用id操作。"
 
 
 def _get_foods_by_tag(group_id: str, tag: str) -> list[str]:
@@ -300,7 +300,7 @@ async def add_food_from_image_url(
         filepath.unlink(missing_ok=True)
         return None
 
-    name_hint = f"「{name}」" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
+    name_hint = f"『{name}』" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
     return f"已保存 1 张食物图✓ {name_hint}\n食物ID：{short_id}"
 
 
@@ -309,7 +309,7 @@ collect_food_cmd = on_command("收集食物", priority=10, block=True)
 
 
 def _collect_food_image_first_rule(event: GroupMessageEvent) -> bool:
-    """仅当消息首段为非文本（如图片）且包含收集食物命令时触发，用于支持「图片在上指令在下」"""
+    """仅当消息首段为非文本（如图片）且包含收集食物命令时触发，用于支持『图片在上指令在下』"""
     msg = event.get_message()
     if not msg or msg[0].is_text():
         return False  # 首段是文本时由 on_command 处理
@@ -402,7 +402,7 @@ async def _do_collect_food(
         await matcher.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
     id_str = "、".join(sid for sid, _ in downloaded)
-    name_hint = f"「{name}」" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
+    name_hint = f"『{name}』" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
     await matcher.finish(
         f"已保存 {len(downloaded)} 张食物图✓ {name_hint}\n食物ID：{id_str}"
     )
@@ -420,7 +420,7 @@ async def handle_collect_food(
 
 @collect_food_image_first_cmd.handle()
 async def handle_collect_food_image_first(bot: Bot, event: GroupMessageEvent):
-    """处理「图片在上、指令在下」的 /收集食物"""
+    """处理『图片在上、指令在下』的 /收集食物"""
     msg = event.get_message()
     text = msg.extract_plain_text().strip()
     m = re.search(r"[/.\!！]收集食物\s*(.*)", text)
@@ -491,7 +491,7 @@ async def handle_supplement_name(
     index = _load_index(group_id)
     index[food_id]["name"] = new_name
     _save_index(group_id, index)
-    await supplement_name_cmd.finish(f"已为食物（ID：{food_id}）补充名字「{new_name}」✓")
+    await supplement_name_cmd.finish(f"已为食物（ID：{food_id}）补充名字『{new_name}』✓")
 
 
 @hidden_food_cmd.handle()
@@ -512,7 +512,7 @@ async def handle_hidden_food(
     group_id = str(event.group_id)
     index = _load_index(group_id)
     if food_id not in index:
-        await hidden_food_cmd.finish(f"食物ID「{food_id}」不存在")
+        await hidden_food_cmd.finish(f"食物ID『{food_id}』不存在")
 
     index[food_id]["hidden"] = True
     _save_index(group_id, index)
@@ -553,7 +553,7 @@ async def handle_tag_food(
         tags.append(tag)
         entry["tags"] = tags
         _save_index(group_id, index)
-    await tag_food_cmd.finish(f"已为食物（ID：{food_id}）添加标签「{tag}」✓")
+    await tag_food_cmd.finish(f"已为食物（ID：{food_id}）添加标签『{tag}』✓")
 
 
 @eat_cmd.handle()
@@ -658,7 +658,7 @@ async def handle_feast(
     ids = [sid for sid, e in index.items() if not e.get("hidden")]
     if not ids:
         await feast_cmd.finish(
-            "本群没有普通食物，吃大餐仅从普通食物中抽取（隐藏食物仅能从「吃什么」单抽获得）"
+            "本群没有普通食物，吃大餐仅从普通食物中抽取（隐藏食物仅能从『吃什么』单抽获得）"
         )
     if len(ids) < count:
         await feast_cmd.finish(
@@ -684,7 +684,7 @@ async def handle_feast(
 
 @what_to_eat_matcher.handle()
 async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
-    """检测「吃什么」：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]；单抽有概率触发隐藏食物"""
+    """检测『吃什么』：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]；单抽有概率触发隐藏食物"""
     group_id = str(event.group_id)
     index = _load_index(group_id)
     if not index:
@@ -722,7 +722,7 @@ async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
         img_resp = await bot.send(event, MessageSegment.image(filepath.read_bytes()))
 
         async def _recall_image():
-            await asyncio.sleep(10)
+            await asyncio.sleep(5)
             try:
                 msg_id = None
                 if isinstance(img_resp, dict):

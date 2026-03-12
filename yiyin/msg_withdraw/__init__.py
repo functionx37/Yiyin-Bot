@@ -1,7 +1,7 @@
 """
 NoneBot2 撤回插件
 - 当群主、群管理或超级管理员对 bot 的消息贴上 id 100 的表情（糗大了）时，bot 尝试撤回该消息（不发道歉）
-- 若为图片识别的食物添加消息，会同步删除对应食物记录并通知（撤回失败也会执行）
+- 若为自动食物收集的食物添加消息，会同步删除对应食物记录并通知（撤回失败也会执行）
 - 依赖 NapCat 等协议端上报 msg_emoji_like / group_msg_emoji_like 通知事件
 """
 
@@ -96,7 +96,7 @@ async def _extract_recalled_text(bot: Bot, message_id: int) -> str:
 
 
 def _parse_food_id(text: str) -> str | None:
-    """从消息文本中解析食物 ID（图片识别添加食物时的格式）"""
+    """从消息文本中解析食物 ID（自动食物收集添加食物时的格式）"""
     m = _FOOD_ID_RE.search(text)
     return m.group(1) if m else None
 
@@ -148,7 +148,7 @@ async def handle_msg_withdraw(
     except Exception:
         return
 
-    # 若为图片识别的食物添加消息，先删除对应食物记录
+    # 若为自动食物收集的食物添加消息，先删除对应食物记录
     deleted_food_id: str | None = None
     text = await _extract_recalled_text(bot, bot_msg_id)
     food_id = _parse_food_id(text)

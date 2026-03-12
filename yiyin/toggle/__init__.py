@@ -4,10 +4,9 @@ NoneBot2 功能开关管理插件
 - 命令：/启用 <功能名>   — 在当前群启用指定功能（仅管理员/群主）
 - 命令：/禁用 <功能名>   — 在当前群禁用指定功能（仅管理员/群主）
 - 原理：通过 run_preprocessor 全局拦截，对已禁用的插件直接忽略
-- 支持三种功能类型：
-  - 插件级功能（默认启用，可禁用）
-  - Opt-in 功能（默认关闭，需手动启用）
-  - 隐藏功能（默认关闭，需手动启用，不在功能列表和提示中展示）
+- 支持两种功能类型：
+  - 默认开（plugins）：默认启用，可禁用
+  - 隐藏（hidden）：默认关闭，需手动启用，不在功能列表和提示中展示
 """
 
 import json
@@ -35,25 +34,20 @@ FEATURES_PATH = PROJECT_ROOT / "config" / "features.json"
 # ==================== 从外部配置加载功能注册表 ====================
 # config/features.json 中：
 #   "plugins" — 默认启用可禁用的插件
-#   "optin"   — 默认关闭需手动启用的功能
 #   "hidden"  — 默认关闭需手动启用，且不在功能列表和提示中展示
 # 新增插件时，编辑 config/features.json 即可纳入开关管理
 with open(FEATURES_PATH, "r", encoding="utf-8") as _f:
     _features = json.load(_f)
 
 PLUGIN_REGISTRY: dict[str, str] = _features.get("plugins", {})
-OPTIN_REGISTRY: dict[str, str] = _features.get("optin", {})
 HIDDEN_REGISTRY: dict[str, str] = _features.get("hidden", {})
 
 # 反向映射：中文功能名 -> 模块名 / 功能标识（用于命令参数解析）
 _DISPLAY_TO_MODULE: dict[str, str] = {v: k for k, v in PLUGIN_REGISTRY.items()}
-_DISPLAY_TO_OPTIN: dict[str, str] = {v: k for k, v in OPTIN_REGISTRY.items()}
 _DISPLAY_TO_HIDDEN: dict[str, str] = {v: k for k, v in HIDDEN_REGISTRY.items()}
 
 # 可见功能名列表（用于错误提示和功能列表，不含隐藏功能）
-_VISIBLE_DISPLAY_NAMES: list[str] = list(PLUGIN_REGISTRY.values()) + list(
-    OPTIN_REGISTRY.values()
-)
+_VISIBLE_DISPLAY_NAMES: list[str] = list(PLUGIN_REGISTRY.values())
 
 # 本插件名称，不可被禁用
 _SELF_PLUGIN = "toggle"
@@ -94,7 +88,7 @@ def _is_disabled(plugin_key: str, group_id: str) -> bool:
 
 
 def is_feature_enabled(feature_key: str, group_id: str) -> bool:
-    """检查指定 opt-in 功能是否在指定群已启用（默认关闭）
+    """检查指定隐藏功能是否在指定群已启用（默认关闭）
 
     供其他插件调用，例如：
         from yiyin.toggle import is_feature_enabled
@@ -123,14 +117,25 @@ def _get_plugin_key(matcher: Matcher) -> str | None:
     匹配优先级：
     1. 全名直接匹配（如 nonebot_plugin_memes）
     2. 子插件前缀匹配（如 nonebot_plugin_memes.utils → nonebot_plugin_memes）
-    3. 取最后一段匹配（如 yiyin.tarot → tarot）
+    3. 对于 yiyin.meme，从 handler 的 __module__ 区分对称/强强
+    4. 取最后一段匹配（如 yiyin.tarot → tarot）
     """
     plugin = matcher.plugin
     if plugin is None:
         return None
     name = plugin.name
 
-    _all_keys = PLUGIN_REGISTRY | OPTIN_REGISTRY | HIDDEN_REGISTRY
+    # 对于 yiyin.meme 的子功能，从 handler 的 __module__ 区分对称/强强
+    if name == "yiyin.meme" and matcher.handlers:
+        handler = matcher.handlers[0]
+        if hasattr(handler, "__module__"):
+            mod = handler.__module__ or ""
+            if "symmetric" in mod:
+                return "yiyin.meme.symmetric"
+            if "ziming" in mod:
+                return "yiyin.meme.ziming"
+
+    _all_keys = PLUGIN_REGISTRY | HIDDEN_REGISTRY
     if name in _all_keys:
         return name
     for key in _all_keys:
@@ -159,7 +164,7 @@ async def toggle_check(matcher: Matcher, event: Event):
 
     group_id = str(event.group_id)
 
-    # 插件级功能：默认启用，检查是否被禁用
+    # 默认开：默认启用，检查是否被禁用
     if plugin_key in PLUGIN_REGISTRY:
         if _is_disabled(plugin_key, group_id):
             raise IgnoredException(
@@ -167,12 +172,11 @@ async def toggle_check(matcher: Matcher, event: Event):
             )
         return
 
-    # Opt-in / 隐藏功能：默认关闭，检查是否已启用
-    _optin_and_hidden = OPTIN_REGISTRY | HIDDEN_REGISTRY
-    if plugin_key in _optin_and_hidden:
+    # 隐藏：默认关闭，检查是否已启用
+    if plugin_key in HIDDEN_REGISTRY:
         if not is_feature_enabled(plugin_key, group_id):
             raise IgnoredException(
-                f"功能『{_optin_and_hidden[plugin_key]}』在群 {group_id} 未启用"
+                f"功能『{HIDDEN_REGISTRY[plugin_key]}』在群 {group_id} 未启用"
             )
 
 
@@ -205,9 +209,6 @@ async def handle_list(bot: Bot, event: GroupMessageEvent):
     for key, display_name in PLUGIN_REGISTRY.items():
         status = "❌ 已禁用" if key in disabled else "✅ 已启用"
         lines.append(f"  {display_name}  {status}")
-    for key, display_name in OPTIN_REGISTRY.items():
-        status = "✅ 已启用" if key in enabled else "❌ 已禁用"
-        lines.append(f"  {display_name}  {status}")
 
     lines.append("")
     lines.append("管理员可使用：")
@@ -229,9 +230,9 @@ async def handle_enable(
         )
 
     module_key = _DISPLAY_TO_MODULE.get(name)
-    optin_key = _DISPLAY_TO_OPTIN.get(name) or _DISPLAY_TO_HIDDEN.get(name)
+    hidden_key = _DISPLAY_TO_HIDDEN.get(name)
 
-    if module_key is None and optin_key is None:
+    if module_key is None and hidden_key is None:
         await enable_cmd.finish(
             f"未知功能『{name}』，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
         )
@@ -240,7 +241,7 @@ async def handle_enable(
     config = _load_config()
 
     if module_key:
-        # 插件级功能：从 disabled 列表中移除
+        # 默认开：从 disabled 列表中移除
         disabled = config.get("disabled", {}).get(group_id, [])
         if module_key not in disabled:
             await enable_cmd.finish(f"功能『{name}』在本群已经是启用状态")
@@ -250,11 +251,11 @@ async def handle_enable(
         else:
             config["disabled"][group_id] = disabled
     else:
-        # Opt-in 功能：添加到 enabled 列表
+        # 隐藏功能：添加到 enabled 列表
         enabled = config.setdefault("enabled", {}).setdefault(group_id, [])
-        if optin_key in enabled:
+        if hidden_key in enabled:
             await enable_cmd.finish(f"功能『{name}』在本群已经是启用状态")
-        enabled.append(optin_key)
+        enabled.append(hidden_key)
 
     _save_config(config)
 
@@ -273,9 +274,9 @@ async def handle_disable(
         )
 
     module_key = _DISPLAY_TO_MODULE.get(name)
-    optin_key = _DISPLAY_TO_OPTIN.get(name) or _DISPLAY_TO_HIDDEN.get(name)
+    hidden_key = _DISPLAY_TO_HIDDEN.get(name)
 
-    if module_key is None and optin_key is None:
+    if module_key is None and hidden_key is None:
         await disable_cmd.finish(
             f"未知功能『{name}』，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
         )
@@ -284,17 +285,17 @@ async def handle_disable(
     config = _load_config()
 
     if module_key:
-        # 插件级功能：添加到 disabled 列表
+        # 默认开：添加到 disabled 列表
         disabled = config.setdefault("disabled", {}).setdefault(group_id, [])
         if module_key in disabled:
             await disable_cmd.finish(f"功能『{name}』在本群已经是禁用状态")
         disabled.append(module_key)
     else:
-        # Opt-in 功能：从 enabled 列表中移除
+        # 隐藏功能：从 enabled 列表中移除
         enabled = config.get("enabled", {}).get(group_id, [])
-        if optin_key not in enabled:
+        if hidden_key not in enabled:
             await disable_cmd.finish(f"功能『{name}』在本群已经是禁用状态")
-        enabled.remove(optin_key)
+        enabled.remove(hidden_key)
         if not enabled:
             config.get("enabled", {}).pop(group_id, None)
         else:

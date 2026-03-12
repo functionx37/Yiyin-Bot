@@ -6,3 +6,4 @@ NoneBot2 表情包制作插件（多功能）
 
 from yiyin.meme import symmetric  # noqa: F401
 from yiyin.meme import ziming     # noqa: F401
+from yiyin.meme import motis      # noqa: F401

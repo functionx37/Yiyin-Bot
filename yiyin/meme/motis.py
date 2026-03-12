@@ -16,7 +16,7 @@ from nonebot.params import CommandArg
 # ==================== 资源路径 ====================
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 MOTIS_IMAGE_PATH = _PROJECT_ROOT / "assets" / "images" / "meme" / "motis.jpg"
-FONT_PATH = _PROJECT_ROOT / "assets" / "fonts" / "PingFang SC.ttf"
+FONT_PATH = _PROJECT_ROOT / "assets" / "fonts" / "SEGUIEMJ.TTF"
 
 # ==================== 气泡区域（相对图片宽高的比例） ====================
 _BUBBLE_LEFT_RATIO = 0.05
@@ -41,7 +41,7 @@ _COMBINING_CODEPOINTS = frozenset({_ZWJ, _VS15, _VS16})
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
     if not FONT_PATH.exists():
         raise FileNotFoundError(
-            f"未找到字体，请将 PingFang SC.ttf 放到 assets/fonts/ 目录"
+            f"未找到字体，请将 SEGUIEMJ.TTF 放到 assets/fonts/ 目录"
         )
     return ImageFont.truetype(str(FONT_PATH), size)
 

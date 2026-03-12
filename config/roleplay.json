@@ -1,5 +1,5 @@
 {
-  "model": "gpt-4o",
+  "model": "grok-4",
   "reply_probability": 0.1,
   "max_context_messages": 30,
   "cooldown_seconds": 100,

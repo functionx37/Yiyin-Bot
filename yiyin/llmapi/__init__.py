@@ -443,3 +443,102 @@ async def generate_image_via_chat(
     except (httpx.TimeoutException, httpx.HTTPError, Exception) as e:
         logger.warning("generate_image_via_chat 异常: {}: {}", type(e).__name__, e)
         return None
+
+
+async def generate_image(
+    prompt: str,
+    image_sources: str | bytes | list[str | bytes] | None = None,
+    *,
+    model: str = "doubao-seedream-4-5-251128",
+    size: str = "2K",
+    response_format: str = "b64_json",
+    watermark: bool = False,
+    timeout: float = 120,
+) -> list[bytes] | None:
+    """使用 Images Generations 接口生成 / 编辑图片（doubao-seedream 等模型）。
+
+    通过 /v1/images/generations 发送 JSON 请求，参考图以 base64 data-url 传入 image 字段。
+    云雾 API 文档：https://yunwu.apifox.cn/
+
+    Args:
+        prompt: 文字描述 / 编辑指令
+        image_sources: 参考图片（可选），支持 bytes 或 base64 data-url，单个或列表
+        model: 模型名称
+        size: 输出尺寸 "1K" | "2K" | "4K" 或具体像素值如 "1024x1024"
+        response_format: 返回格式 "url" | "b64_json"
+        watermark: 是否添加水印
+        timeout: 请求超时（秒）
+
+    Returns:
+        图片二进制数据列表，失败时返回 None
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("YUNWU_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 YUNWU_API_KEY")
+        return None
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "size": size,
+        "response_format": response_format,
+        "watermark": watermark,
+    }
+
+    if image_sources is not None:
+        if not isinstance(image_sources, list):
+            image_sources = [image_sources]
+        images_b64: list[str] = []
+        for src in image_sources:
+            img_bytes = _resolve_image_bytes(src)
+            b64_str = base64.b64encode(img_bytes).decode("utf-8")
+            images_b64.append(f"data:image/png;base64,{b64_str}")
+        payload["image"] = images_b64[0] if len(images_b64) == 1 else images_b64
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{_get_base_url()}/images/generations",
+                json=payload,
+                headers=headers,
+            )
+
+        if resp.status_code != 200:
+            logger.warning(
+                "generate_image 非 200: status={} body={}",
+                resp.status_code,
+                resp.text[:500],
+            )
+            return None
+
+        resp_data = resp.json()
+        items: list[dict[str, Any]] = resp_data.get("data", [])
+        if not items:
+            logger.warning("generate_image data 为空: {}", resp_data)
+            return None
+
+        results: list[bytes] = []
+        for item in items:
+            b64 = item.get("b64_json")
+            if b64:
+                results.append(base64.b64decode(b64))
+            else:
+                url = item.get("url")
+                if url:
+                    async with httpx.AsyncClient(timeout=30) as dl:
+                        img_resp = await dl.get(url)
+                        if img_resp.status_code == 200:
+                            results.append(img_resp.content)
+                        else:
+                            logger.warning("下载生成图片失败: status={} url={}", img_resp.status_code, url)
+
+        return results if results else None
+
+    except (httpx.TimeoutException, httpx.HTTPError, Exception) as e:
+        logger.warning("generate_image 异常: {}: {}", type(e).__name__, e)
+        return None

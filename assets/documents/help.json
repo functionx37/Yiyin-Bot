@@ -200,5 +200,18 @@
                 "description": "生成假聊天记录"
             }
         ]
+    },
+    {
+        "module": "成绩图处理",
+        "function": [
+            {
+                "command": "/<风格> [图片]",
+                "description": "为游戏成绩图生成对应风格的特效图"
+            },
+            {
+                "command": "/成绩图列表",
+                "description": "查看所有可用的成绩图风格及对应说明"
+            }
+        ]
     }
 ]

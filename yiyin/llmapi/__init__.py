@@ -1,13 +1,15 @@
 """
 可复用的 LLM API 调用模块
 - 基于 OpenAI 兼容接口（云雾 API 中转站，https://yunwu.apifox.cn/）
-- 支持纯文本对话与识图（Vision）多模态输入
+- 支持纯文本对话、识图（Vision）多模态输入、参考图生成图片
 - 供其他插件调用，例如：
-    from yiyin.llmapi import chat_completion, describe_image
+    from yiyin.llmapi import chat_completion, describe_image, generate_image_edit
     reply = await chat_completion(messages, model="claude-haiku-4-5-20251001")
     desc = await describe_image("描述这张图", "https://example.com/img.png")
+    imgs = await generate_image_edit("把背景换成星空", "https://example.com/photo.png")
 """
 
+import base64
 import os
 from pathlib import Path
 from typing import Any
@@ -186,3 +188,104 @@ async def describe_image(
         temperature=0.3,
         timeout=timeout,
     )
+
+
+async def generate_image_edit(
+    prompt: str,
+    image_urls: str | list[str],
+    *,
+    model: str = "gpt-image-1",
+    size: str = "1024x1024",
+    quality: str = "auto",
+    n: int = 1,
+    output_format: str = "png",
+    timeout: float = 120,
+) -> list[bytes] | None:
+    """使用参考图 + 文字描述生成新图片，返回图片二进制数据列表。
+
+    基于 OpenAI 兼容的 Images Edits 接口（POST /v1/images/edits）。
+    云雾 API 文档：https://yunwu.apifox.cn/
+
+    gpt-image-1 支持最多 16 张参考图，模型会综合参考图内容与文字描述来生成。
+
+    Args:
+        prompt: 文字描述 / 编辑指令（如"把背景换成星空"、"融合这两张图的风格"）
+        image_urls: 参考图 URL（单个字符串或列表），需公网可访问；
+                    也支持 base64 data-url（"data:image/png;base64,..."）
+        model: 图片模型，默认 gpt-image-1；也可用 gpt-image-1.5 等
+        size: 输出尺寸 "auto" | "1024x1024" | "1536x1024" | "1024x1536"
+        quality: 输出质量 "low" | "medium" | "high" | "auto"
+        n: 生成数量（1-4）
+        output_format: 输出格式 "png" | "jpeg" | "webp"
+        timeout: 请求超时（秒），图片生成通常较慢，默认 120s
+
+    Returns:
+        图片二进制数据列表（可直接写入文件或发送），失败时返回 None
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("YUNWU_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 YUNWU_API_KEY")
+        return None
+
+    if isinstance(image_urls, str):
+        image_urls = [image_urls]
+
+    images = [{"image_url": url} for url in image_urls]
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "images": images,
+        "n": n,
+        "size": size,
+        "quality": quality,
+        "output_format": output_format,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{_get_base_url()}/images/edits",
+                json=payload,
+                headers=headers,
+            )
+
+        if resp.status_code != 200:
+            logger.warning(
+                "generate_image_edit 非 200: status=%s body=%s",
+                resp.status_code,
+                resp.text[:300],
+            )
+            return None
+
+        data = resp.json()
+        items: list[dict[str, Any]] = data.get("data", [])
+        if not items:
+            logger.warning("generate_image_edit data 为空: %s", data)
+            return None
+
+        results: list[bytes] = []
+        for item in items:
+            b64 = item.get("b64_json")
+            if b64:
+                results.append(base64.b64decode(b64))
+            else:
+                url = item.get("url")
+                if url:
+                    async with httpx.AsyncClient(timeout=30) as dl:
+                        img_resp = await dl.get(url)
+                        if img_resp.status_code == 200:
+                            results.append(img_resp.content)
+                        else:
+                            logger.warning("下载生成图片失败: status=%s url=%s", img_resp.status_code, url)
+
+        return results if results else None
+
+    except (httpx.TimeoutException, httpx.HTTPError, KeyError, Exception) as e:
+        logger.warning("generate_image_edit 异常: %s: %s", type(e).__name__, e)
+        return None

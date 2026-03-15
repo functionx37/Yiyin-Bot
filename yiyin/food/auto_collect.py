@@ -6,11 +6,8 @@
 """
 
 import asyncio
-import json
 import tempfile
-import time
 from collections import deque
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -26,9 +23,6 @@ from yiyin.toggle import is_feature_enabled
 # ==================== 配置 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 IMAGE_RECOG_MODEL = "gpt-4o"
-LOG_DIR = PROJECT_ROOT / "data" / "food" / "auto_collect"
-LOG_FILE = LOG_DIR / "recognition.jsonl"
-
 # LLM 输出格式：FOOD:简短名称 | OTHER
 FOOD_PROMPT = """你是一个严格的图片分类器。只看图片内容，按以下规则回复，且只回复一行，不要有任何其他文字。
 
@@ -43,63 +37,6 @@ _RECOG_CACHE: set[str] = set()
 _RECOG_CACHE_ORDER: deque[str] = deque()
 _RECOG_CACHE_MAX = 500
 _recog_cache_lock = asyncio.Lock()
-
-# 日志清理：上次执行清理的时间（秒），避免每次追加都全量扫描
-_last_cleanup_time: float = 0
-_CLEANUP_INTERVAL_SEC = 3600  # 至少间隔 1 小时再执行一次清理
-
-
-def _cleanup_old_recognition_logs() -> None:
-    """清除一天以前的自动食物收集日志"""
-    if not LOG_FILE.exists():
-        return
-    try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=1)
-        kept_lines: list[str] = []
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    ts_str = entry.get("time")
-                    if ts_str:
-                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                        if ts >= cutoff:
-                            kept_lines.append(line)
-                except (json.JSONDecodeError, ValueError):
-                    kept_lines.append(line)  # 解析失败则保留
-        with open(LOG_FILE, "w", encoding="utf-8") as f:
-            f.write("\n".join(kept_lines) + ("\n" if kept_lines else ""))
-    except Exception:
-        logger.exception("自动食物收集日志清理失败")
-
-
-def _append_recognition_log(
-    image_url: str,
-    llm_ok: bool,
-    llm_error: str | None,
-    llm_reply: str | None,
-) -> None:
-    """追加一条自动食物收集日志"""
-    global _last_cleanup_time
-    now = time.time()
-    if now - _last_cleanup_time >= _CLEANUP_INTERVAL_SEC:
-        _cleanup_old_recognition_logs()
-        _last_cleanup_time = now
-
-    entry = {
-        "time": datetime.now(timezone.utc).isoformat(),
-        "image_url": image_url,
-        "llm_success": llm_ok,
-        "llm_error": llm_error,
-        "llm_reply": llm_reply,
-    }
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
 
 async def _claim_image_for_recognition(url: str) -> bool:
     """若该 URL 未被识别过则标记并返回 True，否则返回 False（跳过）"""
@@ -244,10 +181,6 @@ def _parse_llm_response(text: str) -> tuple[str, str | None]:
     return "OTHER", None
 
 
-# 启动时执行一次日志清理
-_cleanup_old_recognition_logs()
-_last_cleanup_time = time.time()
-
 # ==================== 注册 ====================
 auto_collect_matcher = on_message(
     Rule(_not_from_bot, _has_image_no_face, _auto_collect_enabled),
@@ -300,7 +233,6 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
         }
     ]
     reply: str | None = None
-    llm_error: str | None = None
     for attempt in range(2):
         try:
             reply = await chat_completion(
@@ -314,24 +246,13 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
                 break
             logger.warning("自动食物收集 LLM 返回空内容%s", f" (第{attempt+1}次)" if attempt == 0 else "（重试后）")
             if attempt == 1:
-                llm_error = "API 未返回有效内容（可能是 YUNWU_API_KEY 未配置或请求失败）"
-                _append_recognition_log(image_url, llm_ok=False, llm_error=llm_error, llm_reply=None)
                 return
         except Exception as e:
-            llm_error = f"{type(e).__name__}: {e}"
             logger.warning("自动食物收集 LLM 调用失败%s: %s", f" (第{attempt+1}次)" if attempt == 0 else "（重试后）", e)
             if attempt == 1:
                 logger.exception("自动食物收集 LLM 重试后仍失败")
-                _append_recognition_log(image_url, llm_ok=False, llm_error=llm_error, llm_reply=None)
                 return
         await asyncio.sleep(1)  # 重试前稍等
-
-    _append_recognition_log(
-        image_url,
-        llm_ok=True,
-        llm_error=None,
-        llm_reply=reply,
-    )
 
     rec_type, name = _parse_llm_response(reply)
 

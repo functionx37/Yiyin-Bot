@@ -190,9 +190,19 @@ async def describe_image(
     )
 
 
+def _resolve_image_bytes(source: str | bytes) -> bytes:
+    """将图片来源统一转为 bytes。支持 base64 data-url、普通 bytes。"""
+    if isinstance(source, bytes):
+        return source
+    if isinstance(source, str) and source.startswith("data:"):
+        header, _, b64_data = source.partition(",")
+        return base64.b64decode(b64_data)
+    raise ValueError(f"不支持的图片来源类型: {type(source)}")
+
+
 async def generate_image_edit(
     prompt: str,
-    image_urls: str | list[str],
+    image_sources: str | bytes | list[str | bytes],
     *,
     model: str = "gpt-image-1",
     size: str = "1024x1024",
@@ -203,15 +213,16 @@ async def generate_image_edit(
 ) -> list[bytes] | None:
     """使用参考图 + 文字描述生成新图片，返回图片二进制数据列表。
 
-    基于 OpenAI 兼容的 Images Edits 接口（POST /v1/images/edits）。
+    基于 OpenAI 兼容的 Images Edits 接口（POST /v1/images/edits，multipart/form-data）。
     云雾 API 文档：https://yunwu.apifox.cn/
 
     gpt-image-1 支持最多 16 张参考图，模型会综合参考图内容与文字描述来生成。
 
     Args:
         prompt: 文字描述 / 编辑指令（如"把背景换成星空"、"融合这两张图的风格"）
-        image_urls: 参考图 URL（单个字符串或列表），需公网可访问；
-                    也支持 base64 data-url（"data:image/png;base64,..."）
+        image_sources: 图片数据，支持以下格式（单个或列表）：
+                       - bytes: 图片二进制数据
+                       - str: base64 data-url（"data:image/png;base64,..."）
         model: 图片模型，默认 gpt-image-1；也可用 gpt-image-1.5 等
         size: 输出尺寸 "auto" | "1024x1024" | "1536x1024" | "1024x1536"
         quality: 输出质量 "low" | "medium" | "high" | "auto"
@@ -227,16 +238,18 @@ async def generate_image_edit(
         logger.warning("YUNWU_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 YUNWU_API_KEY")
         return None
 
-    if isinstance(image_urls, str):
-        image_urls = [image_urls]
+    if not isinstance(image_sources, list):
+        image_sources = [image_sources]
 
-    images = [{"image_url": url} for url in image_urls]
+    files: list[tuple[str, tuple[str, bytes, str]]] = []
+    for i, src in enumerate(image_sources):
+        img_bytes = _resolve_image_bytes(src)
+        files.append(("image[]", (f"image_{i}.png", img_bytes, "image/png")))
 
-    payload: dict[str, Any] = {
+    data: dict[str, str] = {
         "model": model,
         "prompt": prompt,
-        "images": images,
-        "n": n,
+        "n": str(n),
         "size": size,
         "quality": quality,
         "output_format": output_format,
@@ -244,14 +257,14 @@ async def generate_image_edit(
 
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
     }
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{_get_base_url()}/images/edits",
-                json=payload,
+                data=data,
+                files=files,
                 headers=headers,
             )
 
@@ -263,10 +276,10 @@ async def generate_image_edit(
             )
             return None
 
-        data = resp.json()
-        items: list[dict[str, Any]] = data.get("data", [])
+        resp_data = resp.json()
+        items: list[dict[str, Any]] = resp_data.get("data", [])
         if not items:
-            logger.warning("generate_image_edit data 为空: {}", data)
+            logger.warning("generate_image_edit data 为空: {}", resp_data)
             return None
 
         results: list[bytes] = []

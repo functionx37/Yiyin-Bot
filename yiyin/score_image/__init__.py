@@ -6,7 +6,6 @@ NoneBot2 成绩图处理插件
 - /成绩图列表：以合并转发消息展示所有可用指令及说明
 """
 
-import base64
 import json
 import random
 from io import BytesIO
@@ -56,10 +55,6 @@ async def _download_image(url: str) -> bytes:
         return resp.content
 
 
-def _to_data_url(image_bytes: bytes) -> str:
-    """将图片二进制数据转为 base64 data URL，供 API 使用（避免 QQ 临时 URL 外部不可访问）"""
-    b64 = base64.b64encode(image_bytes).decode()
-    return f"data:image/png;base64,{b64}"
 
 
 def _to_grayscale(image_bytes: bytes) -> bytes:
@@ -96,7 +91,6 @@ async def _handle_style(
 
     try:
         image_bytes = await _download_image(image_url)
-        data_url = _to_data_url(image_bytes)
     except Exception as e:
         logger.exception(f"下载成绩图失败: {e}")
         await matcher.finish(f"图片下载失败：{e}")
@@ -104,7 +98,7 @@ async def _handle_style(
     try:
         results = await generate_image_edit(
             prompt,
-            data_url,
+            image_bytes,
             model=IMAGE_MODEL,
             size="auto",
             quality="high",

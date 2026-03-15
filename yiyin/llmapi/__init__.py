@@ -121,13 +121,13 @@ async def chat_completion(
             )
 
         if resp.status_code != 200:
-            logger.warning("chat_completion 非 200: status=%s body=%s", resp.status_code, resp.text[:200])
+            logger.warning("chat_completion 非 200: status={} body={}", resp.status_code, resp.text[:200])
             return None
 
         data = resp.json()
         choices = data.get("choices", [])
         if not choices:
-            logger.warning("chat_completion choices 为空: %s", {k: v for k, v in data.items() if k != "usage"})
+            logger.warning("chat_completion choices 为空: {}", {k: v for k, v in data.items() if k != "usage"})
             return None
 
         first = choices[0]
@@ -138,7 +138,7 @@ async def chat_completion(
         )
         if result is None:
             logger.warning(
-                "chat_completion 成功但 content 为空: finish_reason=%s, content_type=%s, content=%s",
+                "chat_completion 成功但 content 为空: finish_reason={}, content_type={}, content={}",
                 first.get("finish_reason"),
                 type(content).__name__,
                 repr(content)[:100] if content is not None else None,
@@ -146,7 +146,7 @@ async def chat_completion(
         return result
 
     except (httpx.TimeoutException, httpx.HTTPError, KeyError) as e:
-        logger.warning("chat_completion 异常: %s: %s", type(e).__name__, e)
+        logger.warning("chat_completion 异常: {}: {}", type(e).__name__, e)
         return None
 
 
@@ -257,16 +257,16 @@ async def generate_image_edit(
 
         if resp.status_code != 200:
             logger.warning(
-                "generate_image_edit 非 200: status=%s body=%s",
+                "generate_image_edit 非 200: status={} body={}",
                 resp.status_code,
-                resp.text[:300],
+                resp.text[:500],
             )
             return None
 
         data = resp.json()
         items: list[dict[str, Any]] = data.get("data", [])
         if not items:
-            logger.warning("generate_image_edit data 为空: %s", data)
+            logger.warning("generate_image_edit data 为空: {}", data)
             return None
 
         results: list[bytes] = []
@@ -282,10 +282,10 @@ async def generate_image_edit(
                         if img_resp.status_code == 200:
                             results.append(img_resp.content)
                         else:
-                            logger.warning("下载生成图片失败: status=%s url=%s", img_resp.status_code, url)
+                            logger.warning("下载生成图片失败: status={} url={}", img_resp.status_code, url)
 
         return results if results else None
 
     except (httpx.TimeoutException, httpx.HTTPError, KeyError, Exception) as e:
-        logger.warning("generate_image_edit 异常: %s: %s", type(e).__name__, e)
+        logger.warning("generate_image_edit 异常: {}: {}", type(e).__name__, e)
         return None

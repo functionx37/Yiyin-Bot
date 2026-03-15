@@ -302,3 +302,144 @@ async def generate_image_edit(
     except (httpx.TimeoutException, httpx.HTTPError, KeyError, Exception) as e:
         logger.warning("generate_image_edit 异常: {}: {}", type(e).__name__, e)
         return None
+
+
+def _extract_images_from_content(content: Any) -> list[bytes] | None:
+    """从 chat completions 响应的 content 中提取图片二进制数据。
+
+    支持多种代理返回格式：
+    - content 为 list，其中 image_url 类型含 data-url
+    - content 为 list，其中 inline_data 类型含 base64
+    - content 为 str，内含 data-url
+    """
+    if content is None:
+        return None
+
+    import re
+
+    results: list[bytes] = []
+
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "image_url":
+                url = ""
+                iu = part.get("image_url")
+                if isinstance(iu, dict):
+                    url = iu.get("url", "")
+                elif isinstance(iu, str):
+                    url = iu
+                if url.startswith("data:"):
+                    _, _, b64_data = url.partition(",")
+                    try:
+                        results.append(base64.b64decode(b64_data))
+                    except Exception:
+                        pass
+            elif part.get("type") == "inline_data":
+                b64_data = part.get("inline_data", {}).get("data", "")
+                if b64_data:
+                    try:
+                        results.append(base64.b64decode(b64_data))
+                    except Exception:
+                        pass
+
+    elif isinstance(content, str):
+        for m in re.finditer(r"data:image/[^;]+;base64,([A-Za-z0-9+/=]+)", content):
+            try:
+                results.append(base64.b64decode(m.group(1)))
+            except Exception:
+                pass
+
+    return results if results else None
+
+
+async def generate_image_via_chat(
+    prompt: str,
+    image_sources: str | bytes | list[str | bytes] | None = None,
+    *,
+    model: str = "gemini-2.0-flash-exp-image-generation",
+    max_tokens: int = 4096,
+    timeout: float = 120,
+) -> list[bytes] | None:
+    """使用 Chat Completions 接口生成 / 编辑图片（Gemini 等原生多模态模型）。
+
+    通过 /v1/chat/completions 发送多模态消息（文本 + base64 图片），
+    从响应 content 中提取生成的图片。适用于云雾 API 的 Gemini 图片创作 chat 兼容格式。
+
+    Args:
+        prompt: 文字描述 / 编辑指令
+        image_sources: 参考图片（可选），支持 bytes 或 base64 data-url，单个或列表
+        model: 模型名称
+        max_tokens: 最大生成 token 数
+        timeout: 请求超时（秒）
+
+    Returns:
+        图片二进制数据列表，失败时返回 None
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        logger.warning("YUNWU_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 YUNWU_API_KEY")
+        return None
+
+    if image_sources is not None and not isinstance(image_sources, list):
+        image_sources = [image_sources]
+
+    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+
+    if image_sources:
+        for src in image_sources:
+            img_bytes = _resolve_image_bytes(src)
+            b64_str = base64.b64encode(img_bytes).decode("utf-8")
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{b64_str}"},
+            })
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{_get_base_url()}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+
+        if resp.status_code != 200:
+            logger.warning(
+                "generate_image_via_chat 非 200: status={} body={}",
+                resp.status_code,
+                resp.text[:500],
+            )
+            return None
+
+        data = resp.json()
+        choices = data.get("choices", [])
+        if not choices:
+            logger.warning("generate_image_via_chat choices 为空: {}", data)
+            return None
+
+        msg_content = choices[0].get("message", {}).get("content")
+        results = _extract_images_from_content(msg_content)
+        if not results:
+            logger.warning(
+                "generate_image_via_chat 未在响应中找到图片: content_type={}, content={}",
+                type(msg_content).__name__,
+                repr(msg_content)[:200] if msg_content is not None else None,
+            )
+        return results
+
+    except (httpx.TimeoutException, httpx.HTTPError, Exception) as e:
+        logger.warning("generate_image_via_chat 异常: {}: {}", type(e).__name__, e)
+        return None

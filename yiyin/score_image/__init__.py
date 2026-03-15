@@ -23,7 +23,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 from nonebot.params import CommandArg
 
-from yiyin.llmapi import generate_image_edit
+from yiyin.llmapi import generate_image_via_chat
 
 # ==================== 资源路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -36,7 +36,7 @@ with open(SCORE_JSON_PATH, "r", encoding="utf-8") as _f:
 SPECIAL_COMMANDS = {"随机成绩图", "黑白"}
 LLM_COMMANDS = {k: v for k, v in SCORE_CONFIG.items() if k not in SPECIAL_COMMANDS}
 
-IMAGE_MODEL = "gpt-image-1.5"
+IMAGE_MODEL = "gemini-3-pro-image-preview"
 
 
 def _extract_image_url(msg: Message) -> str | None:
@@ -96,12 +96,10 @@ async def _handle_style(
         await matcher.finish(f"图片下载失败：{e}")
 
     try:
-        results = await generate_image_edit(
+        results = await generate_image_via_chat(
             prompt,
             image_bytes,
             model=IMAGE_MODEL,
-            size="auto",
-            quality="high",
             timeout=180,
         )
     except Exception as e:

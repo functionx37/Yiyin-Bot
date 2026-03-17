@@ -1,149 +1,36 @@
 """
 NoneBot2 翻译插件
 - 命令：/翻译 <目标语言> [文本]
-- 功能：调用腾讯云机器翻译 API，支持中/英/日互译
+- 功能：调用 llmapi（gpt-4o）进行翻译，支持任意目标语言
 - 同时对外暴露 translate_text() 供其他插件调用
 """
 
-import os
-import json
-import hashlib
-import hmac
-import time
-from datetime import datetime, timezone
-
-import httpx
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import MessageEvent, Message
 from nonebot.params import CommandArg
 
-# ==================== 配置 ====================
-TENCENT_SECRET_ID: str = os.environ.get("TENCENT_SECRET_ID", "")
-TENCENT_SECRET_KEY: str = os.environ.get("TENCENT_SECRET_KEY", "")
-TMT_REGION = "ap-guangzhou"
-TMT_ENDPOINT = "tmt.tencentcloudapi.com"
-TMT_SERVICE = "tmt"
-TMT_VERSION = "2018-03-21"
-TMT_ACTION = "TextTranslate"
-
-LANG_MAP: dict[str, str] = {
-    "中文": "zh",
-    "中": "zh",
-    "zh": "zh",
-    "英文": "en",
-    "英": "en",
-    "en": "en",
-    "日文": "ja",
-    "日": "ja",
-    "日语": "ja",
-    "ja": "ja",
-}
-
-LANG_DISPLAY: dict[str, str] = {
-    "zh": "中文",
-    "en": "英文",
-    "ja": "日文",
-}
-
-# ==================== 腾讯云 TC3 签名 ====================
-
-
-def _sign(key: bytes, msg: str) -> bytes:
-    return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
-
-
-def _build_auth_header(payload: str, timestamp: int) -> dict[str, str]:
-    date = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
-
-    # 1. 拼接规范请求串
-    canonical_request = (
-        "POST\n"
-        "/\n"
-        "\n"
-        f"content-type:application/json; charset=utf-8\n"
-        f"host:{TMT_ENDPOINT}\n"
-        f"x-tc-action:{TMT_ACTION.lower()}\n"
-        "\n"
-        "content-type;host;x-tc-action\n"
-        + hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    )
-
-    # 2. 拼接待签名字符串
-    credential_scope = f"{date}/{TMT_SERVICE}/tc3_request"
-    string_to_sign = (
-        "TC3-HMAC-SHA256\n"
-        f"{timestamp}\n"
-        f"{credential_scope}\n"
-        + hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
-    )
-
-    # 3. 计算签名
-    secret_date = _sign(("TC3" + TENCENT_SECRET_KEY).encode("utf-8"), date)
-    secret_service = _sign(secret_date, TMT_SERVICE)
-    secret_signing = _sign(secret_service, "tc3_request")
-    signature = hmac.new(
-        secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-
-    # 4. 拼接 Authorization
-    authorization = (
-        f"TC3-HMAC-SHA256 Credential={TENCENT_SECRET_ID}/{credential_scope}, "
-        f"SignedHeaders=content-type;host;x-tc-action, "
-        f"Signature={signature}"
-    )
-
-    return {
-        "Authorization": authorization,
-        "Content-Type": "application/json; charset=utf-8",
-        "Host": TMT_ENDPOINT,
-        "X-TC-Action": TMT_ACTION,
-        "X-TC-Version": TMT_VERSION,
-        "X-TC-Timestamp": str(timestamp),
-        "X-TC-Region": TMT_REGION,
-    }
-
+from yiyin.llmapi import chat_completion
 
 # ==================== 翻译核心函数 ====================
 
 
-async def translate_text(
-    text: str, target: str, source: str = "auto"
-) -> str | None:
+async def translate_text(text: str, target_lang: str) -> str | None:
     """
-    调用腾讯云文本翻译 API。
+    调用 llmapi（gpt-4o）进行翻译。
 
     :param text: 待翻译文本
-    :param target: 目标语言代码 (zh / en / ja)
-    :param source: 源语言代码，默认 auto 自动检测
+    :param target_lang: 目标语言（如 英文、日文、法语 等，支持任意语言）
     :return: 翻译后的文本，失败时返回 None
     """
-    if not TENCENT_SECRET_ID or not TENCENT_SECRET_KEY:
-        return None
-
-    payload = json.dumps(
-        {
-            "SourceText": text,
-            "Source": source,
-            "Target": target,
-            "ProjectId": 0,
-        }
+    prompt = f"请帮我翻译以下文本为{target_lang}：\n\n{text}\n\n要求：只返回翻译后的文本，不要有任何解释、说明或额外内容。"
+    messages = [{"role": "user", "content": prompt}]
+    result = await chat_completion(
+        messages,
+        model="gpt-4o",
+        temperature=0.3,
+        max_tokens=2048,
     )
-    timestamp = int(time.time())
-    headers = _build_auth_header(payload, timestamp)
-
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            f"https://{TMT_ENDPOINT}", headers=headers, content=payload
-        )
-
-    if resp.status_code != 200:
-        return None
-
-    data = resp.json()
-    response = data.get("Response", {})
-    if "Error" in response:
-        return None
-    return response.get("TargetText")
+    return result.strip() if result else None
 
 
 # ==================== 注册命令 ====================
@@ -157,28 +44,20 @@ async def handle_translate(event: MessageEvent, args: Message = CommandArg()):
     支持两种用法：
       1. /翻译 <目标语言> <文本>
       2. 引用一条消息并发送 /翻译 <目标语言>
+    支持任意目标语言（如 英文、日文、法语、韩语 等）
     """
-    if not TENCENT_SECRET_ID or not TENCENT_SECRET_KEY:
-        await translate_cmd.finish("翻译 API 未配置，请联系管理员。")
-
     raw = args.extract_plain_text().strip()
     if not raw:
-        supported = "、".join(LANG_DISPLAY.values())
         await translate_cmd.finish(
-            f"用法：/翻译 <目标语言> <文本>\n"
-            f"或引用一条消息并发送：/翻译 <目标语言>\n"
-            f"支持语言：{supported}\n"
-            f"示例：/翻译 英文 你好世界"
+            "用法：/翻译 <目标语言> <文本>\n"
+            "或引用一条消息并发送：/翻译 <目标语言>\n"
+            "示例：/翻译 英文 你好世界"
         )
 
     parts = raw.split(maxsplit=1)
-    lang_input = parts[0]
-    target = LANG_MAP.get(lang_input)
-    if not target:
-        supported = "、".join(LANG_DISPLAY.values())
-        await translate_cmd.finish(
-            f"不支持的目标语言『{lang_input}』\n支持的语言：{supported}"
-        )
+    target_lang = parts[0]
+    if not target_lang:
+        await translate_cmd.finish("请指定目标语言，如：/翻译 英文 你好世界")
 
     # 优先使用命令参数中的文本，其次从引用消息中提取
     text = parts[1] if len(parts) >= 2 else ""
@@ -190,9 +69,8 @@ async def handle_translate(event: MessageEvent, args: Message = CommandArg()):
             "示例：/翻译 英文 你好世界"
         )
 
-    result = await translate_text(text, target)
+    result = await translate_text(text, target_lang)
     if result is None:
-        await translate_cmd.finish("翻译失败，请稍后重试。")
+        await translate_cmd.finish("翻译失败，请稍后重试。（请确认 YUNWU_API_KEY 已配置）")
 
-    lang_name = LANG_DISPLAY.get(target, target)
-    await translate_cmd.finish(f"【翻译 → {lang_name}】\n{result}")
+    await translate_cmd.finish(f"【翻译 → {target_lang}】\n{result}")

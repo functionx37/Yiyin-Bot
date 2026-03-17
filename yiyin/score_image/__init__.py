@@ -36,7 +36,7 @@ with open(SCORE_JSON_PATH, "r", encoding="utf-8") as _f:
 SPECIAL_COMMANDS = {"随机成绩图", "黑白"}
 LLM_COMMANDS = {k: v for k, v in SCORE_CONFIG.items() if k not in SPECIAL_COMMANDS}
 
-IMAGE_MODEL = "gemini-3-pro-image-preview"
+IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 
 
 def _extract_image_url(msg: Message) -> str | None:

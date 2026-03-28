@@ -5,6 +5,8 @@ NoneBot2 贴表情 / 发表情插件
 - 命令：/贴<数字>个 [引用]      — 给引用的消息随机贴上指定个数的表情
 - 命令：/发 <ID>              — 发送对应ID的QQ系统表情
 - 命令：/发 随机               — 随机发送一个QQ系统表情
+- 通知：任意群友对群消息贴表情 id 128514 或 182 时，机器人对该消息贴 id 387
+  （依赖协议端上报 msg_emoji_like / group_msg_emoji_like，事件模型见 msg_withdraw）
 """
 
 import asyncio
@@ -12,15 +14,20 @@ import json
 import random
 import re
 from pathlib import Path
+from typing import Union
 
-from nonebot import on_command
+from nonebot import on_command, on_notice
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
     Message,
     MessageSegment,
 )
+from nonebot.adapters.onebot.v11.event import NoticeEvent
 from nonebot.params import CommandArg
+from nonebot.rule import Rule
+
+from yiyin.msg_withdraw import GroupMsgEmojiLikeNoticeEvent, MsgEmojiLikeNoticeEvent
 
 # ==================== 资源路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -71,6 +78,43 @@ def _make_node(name: str, uin: str, content: Message) -> dict:
         "type": "node",
         "data": {"name": name, "uin": uin, "content": content},
     }
+
+
+# ==================== 群友贴表情 → 机器人跟贴 387 ====================
+_TRIGGER_EMOJI_IDS = frozenset({"128514", "182"})
+_MIRROR_EMOJI_ID = "387"
+
+
+def _is_mirror387_trigger(event: NoticeEvent) -> bool:
+    """群消息被贴表情且为 128514 / 182（事件模型与 msg_withdraw 一致）"""
+    if not isinstance(event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent)):
+        return False
+    return event.emoji_id in _TRIGGER_EMOJI_IDS
+
+
+emoji_mirror387_notice = on_notice(
+    Rule(_is_mirror387_trigger),
+    priority=6,
+    block=False,
+)
+
+
+@emoji_mirror387_notice.handle()
+async def handle_emoji_mirror387(
+    bot: Bot,
+    event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
+):
+    """任意群友对群消息贴 128514 或 182 时，机器人对该消息贴 387"""
+    if not event.group_id:
+        return
+    try:
+        await bot.call_api(
+            "set_msg_emoji_like",
+            message_id=event.message_id,
+            emoji_id=_MIRROR_EMOJI_ID,
+        )
+    except Exception:
+        pass
 
 
 # ==================== 注册命令 ====================

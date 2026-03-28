@@ -360,7 +360,7 @@ async def generate_image_via_chat(
     *,
     model: str = "gemini-2.0-flash-exp-image-generation",
     max_tokens: int = 4096,
-    timeout: float = 120,
+    timeout: float = 420,
 ) -> list[bytes] | None:
     """使用 Chat Completions 接口生成 / 编辑图片（Gemini 等原生多模态模型）。
 

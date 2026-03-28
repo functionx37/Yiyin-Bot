@@ -66,16 +66,18 @@ def _to_grayscale(image_bytes: bytes) -> bytes:
     return buf.getvalue()
 
 
-async def _get_image_url(event: GroupMessageEvent, args: Message) -> str | None:
-    """从命令参数或引用消息中提取图片 URL"""
+async def _get_image_url(
+    event: GroupMessageEvent, args: Message
+) -> tuple[str | None, int | None]:
+    """从命令参数或引用消息中提取图片 URL，同时返回原图所在消息 ID"""
     url = _extract_image_url(args)
     if url:
-        return url
+        return url, event.message_id
     if event.reply:
         url = _extract_image_url(event.reply.message)
         if url:
-            return url
-    return None
+            return url, event.reply.message_id
+    return None, None
 
 
 async def _handle_style(
@@ -85,6 +87,7 @@ async def _handle_style(
     style_name: str,
     prompt: str,
     image_url: str,
+    reply_message_id: int | None = None,
 ):
     """调用大模型处理成绩图"""
     await matcher.send(f"🎨 正在生成「{style_name}」风格成绩图，请稍候…")
@@ -100,7 +103,7 @@ async def _handle_style(
             prompt,
             image_bytes,
             model=IMAGE_MODEL,
-            timeout=180,
+            timeout=420,
         )
     except Exception as e:
         logger.exception(f"成绩图生成异常: {e}")
@@ -109,7 +112,11 @@ async def _handle_style(
     if not results:
         await matcher.finish("生成失败：未能获取到生成结果，请稍后重试")
 
-    await matcher.finish(MessageSegment.image(results[0]))
+    reply_msg = Message()
+    if reply_message_id:
+        reply_msg += MessageSegment.reply(reply_message_id)
+    reply_msg += MessageSegment.image(results[0])
+    await matcher.finish(reply_msg)
 
 
 # ==================== /成绩图列表 ====================
@@ -145,7 +152,7 @@ bw_cmd = on_command("黑白", priority=10, block=True)
 
 @bw_cmd.handle()
 async def handle_bw(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
-    image_url = await _get_image_url(event, args)
+    image_url, reply_message_id = await _get_image_url(event, args)
     if not image_url:
         await bw_cmd.finish("请附带图片或回复一张成绩图，例如：\n/黑白 [图片]")
 
@@ -158,7 +165,11 @@ async def handle_bw(bot: Bot, event: GroupMessageEvent, args: Message = CommandA
         logger.exception(f"黑白图片处理失败: {e}")
         await bw_cmd.finish(f"处理失败：{e}")
 
-    await bw_cmd.finish(MessageSegment.image(result))
+    reply_msg = Message()
+    if reply_message_id:
+        reply_msg += MessageSegment.reply(reply_message_id)
+    reply_msg += MessageSegment.image(result)
+    await bw_cmd.finish(reply_msg)
 
 
 # ==================== /随机成绩图 ====================
@@ -169,7 +180,7 @@ random_score_cmd = on_command("随机成绩图", priority=10, block=True)
 async def handle_random_score(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    image_url = await _get_image_url(event, args)
+    image_url, reply_message_id = await _get_image_url(event, args)
     if not image_url:
         await random_score_cmd.finish(
             "请附带图片或回复一张成绩图，例如：\n/随机成绩图 [图片]"
@@ -178,7 +189,9 @@ async def handle_random_score(
     style_name = random.choice(list(LLM_COMMANDS.keys()))
     prompt = LLM_COMMANDS[style_name]
 
-    await _handle_style(bot, event, random_score_cmd, style_name, prompt, image_url)
+    await _handle_style(
+        bot, event, random_score_cmd, style_name, prompt, image_url, reply_message_id
+    )
 
 
 # ==================== 动态注册各风格指令 ====================
@@ -193,13 +206,15 @@ def _make_handler(style_name: str, prompt: str, matcher):
     async def handler(
         bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
     ):
-        image_url = await _get_image_url(event, args)
+        image_url, reply_message_id = await _get_image_url(event, args)
         if not image_url:
             await matcher.finish(
                 f"请附带图片或回复一张成绩图，例如：\n/{style_name} [图片]"
             )
 
-        await _handle_style(bot, event, matcher, style_name, prompt, image_url)
+        await _handle_style(
+            bot, event, matcher, style_name, prompt, image_url, reply_message_id
+        )
 
     return handler
 

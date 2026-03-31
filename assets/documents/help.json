@@ -151,6 +151,19 @@
         ]
     },
     {
+        "module": "word拼词",
+        "function": [
+            {
+                "command": "/dqxm [n]",
+                "description": "从 d/q/x/m 字库随机拼词，n 省略默认 1，最大 100"
+            },
+            {
+                "command": "/ccb [n]",
+                "description": "从 (c/ch)/(c/ch)/b 字库随机拼词，n 省略默认 1，最大 100"
+            }
+        ]
+    },
+    {
         "module": "功能管理",
         "function": [
             {

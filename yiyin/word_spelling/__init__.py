@@ -1,8 +1,8 @@
 """
 NoneBot2 word拼词插件
-- 当前指令：/dqxm [n]
-- 规则：从 d/q/x/m 四个拼音字库各随机一个字，拼成四字词
-- 扩展：通过 WORD_RULES 配置后续可新增 /ccb 等同类指令
+- 当前指令：/dqxm [n]、/ccb [n]
+- 规则：按命令规则从拼音字库随机取字拼词
+- 扩展：通过 WORD_RULES 配置可继续新增同类指令
 """
 
 import json
@@ -24,15 +24,19 @@ CHUNK_SIZE = 10
 
 
 class WordRule(TypedDict):
-    pinyin_keys: list[str]
+    pinyin_slots: list[str | list[str]]
     data_file: Path
 
 
 # 可扩展规则：新增指令时只需补充配置项并注册 matcher
 WORD_RULES: dict[str, WordRule] = {
     "dqxm": {
-        "pinyin_keys": ["d", "q", "x", "m"],
+        "pinyin_slots": ["d", "q", "x", "m"],
         "data_file": DATA_DIR / "dqxm.json",
+    },
+    "ccb": {
+        "pinyin_slots": [["c", "ch"], ["c", "ch"], "b"],
+        "data_file": DATA_DIR / "ccb.json",
     }
 }
 
@@ -54,8 +58,15 @@ def _load_pinyin_chars(pinyin_key: str) -> list[str]:
     return chars
 
 
-def _generate_word(pinyin_keys: list[str]) -> str:
-    return "".join(random.choice(_load_pinyin_chars(key)) for key in pinyin_keys)
+def _generate_word(pinyin_slots: list[str | list[str]]) -> str:
+    chars: list[str] = []
+    for slot in pinyin_slots:
+        if isinstance(slot, str):
+            pinyin_key = slot
+        else:
+            pinyin_key = random.choice(slot)
+        chars.append(random.choice(_load_pinyin_chars(pinyin_key)))
+    return "".join(chars)
 
 
 def _load_recorded_words(path: Path) -> list[str]:
@@ -88,17 +99,17 @@ def _append_unique_words(path: Path, words: list[str]) -> None:
         json.dump(merged, f, ensure_ascii=False, indent=2)
 
 
-def _parse_count(args_text: str) -> tuple[int | None, str | None]:
+def _parse_count(args_text: str, command: str) -> tuple[int | None, str | None]:
     if not args_text:
         return 1, None
 
     try:
         count = int(args_text)
     except ValueError:
-        return None, "参数 n 必须是整数，用法：/dqxm [n]"
+        return None, f"参数 n 必须是整数，用法：/{command} [n]"
 
     if count <= 0:
-        return None, "参数 n 必须大于 0，用法：/dqxm [n]"
+        return None, f"参数 n 必须大于 0，用法：/{command} [n]"
 
     if count > MAX_COUNT:
         count = MAX_COUNT
@@ -123,26 +134,30 @@ def _build_forward_nodes(bot_name: str, bot_uin: str, words: list[str]) -> list[
     return nodes
 
 
-dqxm_cmd = on_command("dqxm", priority=10, block=True)
+def _register_word_command(command: str):
+    matcher = on_command(command, priority=10, block=True)
+    rule = WORD_RULES[command]
+
+    @matcher.handle()
+    async def _handle(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+        count, error = _parse_count(args.extract_plain_text().strip(), command)
+        if error:
+            await matcher.finish(error)
+        assert count is not None
+
+        words = [_generate_word(rule["pinyin_slots"]) for _ in range(count)]
+        _append_unique_words(rule["data_file"], words)
+
+        if count <= DIRECT_SEND_THRESHOLD:
+            await matcher.finish("\n".join(words))
+
+        bot_info = await bot.get_login_info()
+        bot_name = bot_info.get("nickname", "YiyinBot")
+        bot_uin = str(bot.self_id)
+        nodes = _build_forward_nodes(bot_name, bot_uin, words)
+        await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
 
 
-@dqxm_cmd.handle()
-async def handle_dqxm(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
-    rule = WORD_RULES["dqxm"]
-    count, error = _parse_count(args.extract_plain_text().strip())
-    if error:
-        await dqxm_cmd.finish(error)
-    assert count is not None
-
-    words = [_generate_word(rule["pinyin_keys"]) for _ in range(count)]
-    _append_unique_words(rule["data_file"], words)
-
-    if count <= DIRECT_SEND_THRESHOLD:
-        await dqxm_cmd.finish("\n".join(words))
-
-    bot_info = await bot.get_login_info()
-    bot_name = bot_info.get("nickname", "YiyinBot")
-    bot_uin = str(bot.self_id)
-    nodes = _build_forward_nodes(bot_name, bot_uin, words)
-    await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+for _command in WORD_RULES:
+    _register_word_command(_command)
 

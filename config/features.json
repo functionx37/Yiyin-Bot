@@ -2,6 +2,7 @@
     "plugins": {
         "tarot": "塔罗牌",
         "quotes": "群友语录",
+        "idol": "爱抖露",
         "meme": "随机表情",
         "translate": "翻译",
         "choose": "随机选择",

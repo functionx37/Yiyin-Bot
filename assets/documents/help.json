@@ -71,6 +71,35 @@
         ]
     },
     {
+        "module": "爱抖露",
+        "function": [
+            {
+                "command": "/up <name> [图片]",
+                "description": "上传照片"
+            },
+            {
+                "command": "/list",
+                "description": "查看已记录的偶像列表和图片数量"
+            },
+            {
+                "command": "/idol",
+                "description": "随机发送一张照片"
+            },
+            {
+                "command": "<name> [n]",
+                "description": "发送指定照片"
+            },
+            {
+                "command": "/del <ID>",
+                "description": "删除指定ID的图片"
+            },
+            {
+                "command": "/rename <name1> <name2>",
+                "description": "为 name1 添加别名 name2"
+            }
+        ]
+    },
+    {
         "module": "食物图鉴",
         "function": [
             {

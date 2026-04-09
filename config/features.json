@@ -11,7 +11,8 @@
         "msg_withdraw": "消息撤回",
         "nonebot_plugin_fakemsg": "伪造消息",
         "score_image": "成绩图处理",
-        "word_spelling": "word拼词"
+        "word_spelling": "word拼词",
+        "chain": "接龙"
     },
     "plugin_groups": {
         "meme": [

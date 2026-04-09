@@ -166,11 +166,27 @@
         ]
     },
     {
-        "module": "KTV接龙",
+        "module": "接龙",
         "function": [
             {
                 "command": "有k吗",
-                "description": "参与 KTV 接龙"
+                "description": "参与 KTV 接龙（周期 当日 6:00 至次日 6:00）"
+            },
+            {
+                "command": "有饭吗",
+                "description": "参与聚餐接龙（午餐 10:00–14:00、晚餐 16:00–20:00，本地时间）"
+            },
+            {
+                "command": "/去吃 <店名>",
+                "description": "在当前聚餐时段将接龙抬头设为「店名聚餐：」"
+            },
+            {
+                "command": "/我不k了",
+                "description": "退出当前周期的 KTV 接龙"
+            },
+            {
+                "command": "/我不饭了",
+                "description": "退出当前时段的聚餐接龙"
             }
         ]
     },

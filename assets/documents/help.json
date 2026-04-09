@@ -148,6 +148,10 @@
                 "description": "制作若叶睦表情包"
             },
             {
+                "command": "/男娘 [@群友]",
+                "description": "将男娘标识加到群友头像上"
+            },
+            {
                 "command": "/随机表情 [文字/图片]",
                 "description": "生成对应的随机表情"
             },
@@ -158,6 +162,15 @@
             {
                 "command": "<emoji>+<emoji>",
                 "description": "合成emoji"
+            }
+        ]
+    },
+    {
+        "module": "KTV接龙",
+        "function": [
+            {
+                "command": "有k吗",
+                "description": "参与 KTV 接龙"
             }
         ]
     },

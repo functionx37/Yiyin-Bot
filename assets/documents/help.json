@@ -91,11 +91,11 @@
             },
             {
                 "command": "/del <ID>",
-                "description": "删除指定ID的图片"
+                "description": "删除指定图片"
             },
             {
                 "command": "/rename <name1> <name2>",
-                "description": "为 name1 添加别名 name2"
+                "description": "添加别名"
             }
         ]
     },
@@ -209,15 +209,15 @@
         ]
     },
     {
-        "module": "word拼词",
+        "module": "拼词",
         "function": [
             {
                 "command": "/dqxm [n]",
-                "description": "从 d/q/x/m 字库随机拼词，n 省略默认 1，最大 100"
+                "description": "从 d/q/x/m 字库随机拼词"
             },
             {
                 "command": "/ccb [n]",
-                "description": "从 (c/ch)/(c/ch)/b 字库随机拼词，n 省略默认 1，最大 100"
+                "description": "从 (c/ch)/(c/ch)/b 字库随机拼词"
             }
         ]
     },

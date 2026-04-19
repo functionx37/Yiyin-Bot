@@ -343,7 +343,7 @@ async def handle_answer(event: MessageEvent):
 
     at_msg = MessageSegment.at(event.user_id)
     if correct:
-        await answer_matcher.finish(at_msg + MessageSegment.text(" ✔回答正确！"))
+        await answer_matcher.finish(at_msg + MessageSegment.text(" ✔️回答正确！"))
     await answer_matcher.finish(at_msg + MessageSegment.text(" ❌️回答错误！"))
 
 

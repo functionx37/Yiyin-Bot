@@ -209,6 +209,23 @@
         ]
     },
     {
+        "module": "随蓝",
+        "function": [
+            {
+                "command": "/随蓝",
+                "description": "发起随蓝游戏"
+            },
+            {
+                "command": "%<答案>",
+                "description": "提交答案"
+            },
+            {
+                "command": "/看答案",
+                "description": "查看答案"
+            }
+        ]
+    },
+    {
         "module": "拼词",
         "function": [
             {

@@ -235,6 +235,10 @@
             {
                 "command": "/ccb [n]",
                 "description": "从 (c/ch)/(c/ch)/b 字库随机拼词"
+            },
+            {
+                "command": "/拼 <声母> [n]",
+                "description": "对应的随机拼词"
             }
         ]
     },

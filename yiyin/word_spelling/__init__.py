@@ -1,6 +1,7 @@
 """
 NoneBot2 word拼词插件
 - 当前指令：/dqxm [n]、/ccb [n]
+- 新增通用指令：/拼 <声母序列> [n]
 - 规则：按命令规则从拼音字库随机取字拼词
 - 扩展：通过 WORD_RULES 配置可继续新增同类指令
 """
@@ -41,6 +42,10 @@ WORD_RULES: dict[str, WordRule] = {
 }
 
 _PINYIN_CACHE: dict[str, list[str]] = {}
+_AVAILABLE_PINYIN_KEYS = sorted(
+    (path.stem for path in PINYIN_DIR.glob("*.json")),
+    key=lambda item: (-len(item), item),
+)
 
 
 def _load_pinyin_chars(pinyin_key: str) -> list[str]:
@@ -56,6 +61,64 @@ def _load_pinyin_chars(pinyin_key: str) -> list[str]:
 
     _PINYIN_CACHE[pinyin_key] = chars
     return chars
+
+
+def _normalize_dynamic_pattern(pattern: str) -> str:
+    normalized = pattern.lower()
+    filename_chars = [
+        ch if ch.isalnum() else "_" for ch in normalized if ch.isascii()
+    ]
+    filename = "".join(filename_chars).strip("_")
+    return filename or "custom"
+
+
+def _parse_pinyin_pattern(pattern: str) -> tuple[list[str | list[str]] | None, str | None]:
+    normalized = pattern.strip().lower()
+    if not normalized:
+        return None, "用法：/拼 <声母序列> [n]"
+    if normalized.startswith("/"):
+        return None, f"声母序列不能以 / 开头：{pattern}"
+
+    tokens: list[str] = []
+    linked_with_previous: list[bool] = []
+    index = 0
+    next_token_linked = False
+    while index < len(normalized):
+        matched_key = next(
+            (key for key in _AVAILABLE_PINYIN_KEYS if normalized.startswith(key, index)),
+            None,
+        )
+        if matched_key is None:
+            return None, f"无法识别的声母序列：{pattern}"
+
+        tokens.append(matched_key)
+        linked_with_previous.append(next_token_linked)
+        next_token_linked = False
+        index += len(matched_key)
+        if index >= len(normalized):
+            break
+
+        separator = normalized[index]
+        if separator != "/":
+            continue
+
+        next_token_linked = True
+        index += 1
+        if index >= len(normalized):
+            return None, f"声母序列不能以 / 结尾：{pattern}"
+
+    slots: list[str | list[str]] = []
+    current_slot: list[str] = [tokens[0]]
+    for idx in range(1, len(tokens)):
+        if linked_with_previous[idx]:
+            current_slot.append(tokens[idx])
+            continue
+
+        slots.append(current_slot[0] if len(current_slot) == 1 else current_slot.copy())
+        current_slot = [tokens[idx]]
+
+    slots.append(current_slot[0] if len(current_slot) == 1 else current_slot.copy())
+    return slots, None
 
 
 def _generate_word(pinyin_slots: list[str | list[str]]) -> str:
@@ -116,6 +179,28 @@ def _parse_count(args_text: str, command: str) -> tuple[int | None, str | None]:
     return count, None
 
 
+def _parse_dynamic_command_args(args_text: str) -> tuple[list[str | list[str]] | None, int | None, Path | None, str | None]:
+    parts = args_text.split()
+    if not parts:
+        return None, None, None, "用法：/拼 <声母序列> [n]"
+    if len(parts) > 2:
+        return None, None, None, "用法：/拼 <声母序列> [n]"
+
+    pattern = parts[0]
+    count_text = parts[1] if len(parts) == 2 else ""
+
+    pinyin_slots, error = _parse_pinyin_pattern(pattern)
+    if error:
+        return None, None, None, error
+
+    count, error = _parse_count(count_text, "拼")
+    if error:
+        return None, None, None, error
+
+    data_file = DATA_DIR / f"dynamic_{_normalize_dynamic_pattern(pattern)}.json"
+    return pinyin_slots, count, data_file, None
+
+
 def _build_forward_nodes(bot_name: str, bot_uin: str, words: list[str]) -> list[dict]:
     nodes: list[dict] = []
     for i in range(0, len(words), CHUNK_SIZE):
@@ -134,6 +219,23 @@ def _build_forward_nodes(bot_name: str, bot_uin: str, words: list[str]) -> list[
     return nodes
 
 
+async def _finish_with_words(
+    matcher,
+    bot: Bot,
+    event: GroupMessageEvent,
+    words: list[str],
+) -> None:
+    if len(words) <= DIRECT_SEND_THRESHOLD:
+        await matcher.finish("\n".join(words))
+
+    bot_info = await bot.get_login_info()
+    bot_name = bot_info.get("nickname", "YiyinBot")
+    bot_uin = str(bot.self_id)
+    nodes = _build_forward_nodes(bot_name, bot_uin, words)
+    await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+    await matcher.finish()
+
+
 def _register_word_command(command: str):
     matcher = on_command(command, priority=10, block=True)
     rule = WORD_RULES[command]
@@ -147,15 +249,30 @@ def _register_word_command(command: str):
 
         words = [_generate_word(rule["pinyin_slots"]) for _ in range(count)]
         _append_unique_words(rule["data_file"], words)
+        await _finish_with_words(matcher, bot, event, words)
 
-        if count <= DIRECT_SEND_THRESHOLD:
-            await matcher.finish("\n".join(words))
 
-        bot_info = await bot.get_login_info()
-        bot_name = bot_info.get("nickname", "YiyinBot")
-        bot_uin = str(bot.self_id)
-        nodes = _build_forward_nodes(bot_name, bot_uin, words)
-        await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+spell_matcher = on_command("拼", priority=10, block=True)
+
+
+@spell_matcher.handle()
+async def _handle_spell_command(
+    bot: Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+):
+    pinyin_slots, count, data_file, error = _parse_dynamic_command_args(
+        args.extract_plain_text().strip()
+    )
+    if error:
+        await spell_matcher.finish(error)
+    assert pinyin_slots is not None
+    assert count is not None
+    assert data_file is not None
+
+    words = [_generate_word(pinyin_slots) for _ in range(count)]
+    _append_unique_words(data_file, words)
+    await _finish_with_words(spell_matcher, bot, event, words)
 
 
 for _command in WORD_RULES:

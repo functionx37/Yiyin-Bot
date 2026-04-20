@@ -14,10 +14,12 @@ from nonebot import on_command, on_message
 from nonebot.adapters.onebot.v11 import (
     Bot,
     GroupMessageEvent,
+    Message,
     MessageEvent,
     MessageSegment,
 )
 from nonebot.log import logger
+from nonebot.params import CommandArg
 from nonebot.rule import Rule
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -105,6 +107,25 @@ def _group_lock(group_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _GROUP_LOCKS[group_id] = lock
     return lock
+
+
+def _parse_session_rounds(args_text: str) -> tuple[int | None, str | None]:
+    if not args_text:
+        return SESSION_ROUNDS, None
+
+    parts = args_text.split()
+    if len(parts) != 1:
+        return None, "用法：/随蓝 [n]"
+
+    try:
+        rounds = int(parts[0])
+    except ValueError:
+        return None, "参数 n 必须是整数，用法：/随蓝 [n]"
+
+    if rounds <= 0:
+        return None, "参数 n 必须大于 0，用法：/随蓝 [n]"
+
+    return rounds, None
 
 
 def _sanitize_display_name(name: str) -> str:
@@ -494,9 +515,13 @@ reveal_cmd = on_command("看答案", priority=10, block=True)
 
 
 @vayu_cmd.handle()
-async def handle_vayu(bot: Bot, event: MessageEvent):
+async def handle_vayu(bot: Bot, event: MessageEvent, args: Message = CommandArg()):
     if not isinstance(event, GroupMessageEvent):
         return
+
+    total_rounds, error = _parse_session_rounds(args.extract_plain_text().strip())
+    if error:
+        await vayu_cmd.finish(error)
 
     async with _group_lock(event.group_id):
         if event.group_id in _GROUP_GAMES:
@@ -510,6 +535,7 @@ async def handle_vayu(bot: Bot, event: MessageEvent):
             group_id=event.group_id,
             record=record,
             chunks=_build_chunks(record),
+            total_rounds=total_rounds,
             used_record_ids={record.id},
         )
         _GROUP_GAMES[event.group_id] = game

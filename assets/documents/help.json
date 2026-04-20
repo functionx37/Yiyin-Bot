@@ -212,7 +212,7 @@
         "module": "随蓝",
         "function": [
             {
-                "command": "/随蓝",
+                "command": "/随蓝 [n]",
                 "description": "发起随蓝游戏"
             },
             {

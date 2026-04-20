@@ -31,7 +31,6 @@ PUNCT_BIAS = 1
 ANSWER_PREFIX = "%"
 SESSION_ROUNDS = 5
 CORRECT_SCORE = 2
-WRONG_SCORE = -1
 
 BAD_END_CATEGORIES = {"Ps", "Pi"}
 BAD_START_CATEGORIES = {"Pe", "Pf", "Po"}
@@ -302,9 +301,7 @@ def _build_round_result_message(record: VayuRecord, winner_id: int | None = None
 
 
 def _build_wrong_answer_message(user_id: int):
-    return MessageSegment.at(user_id) + MessageSegment.text(
-        f"✖️回答错误！{_format_score_delta(WRONG_SCORE)}分"
-    )
+    return MessageSegment.at(user_id) + MessageSegment.text("✖️回答错误！")
 
 
 def _build_scoreboard_message(game: VayuGame) -> str:
@@ -531,6 +528,7 @@ async def handle_answer(bot: Bot, event: MessageEvent):
         return
 
     correct = False
+    ignored_previous_answer = False
     result_message: object | None = None
     should_start_next_round = False
     final_scoreboard: str | None = None
@@ -549,9 +547,10 @@ async def handle_answer(bot: Bot, event: MessageEvent):
             if not should_start_next_round:
                 _remove_game(event.group_id, game)
         elif _is_previous_round_answer(game, answer):
-            return
+            ignored_previous_answer = True
         else:
-            _change_score(game, event.user_id, _display_name(event), WRONG_SCORE)
+            _remember_participant(game, event.user_id, _display_name(event))
+            game.scores.setdefault(event.user_id, 0)
 
     if correct:
         await _dispatch_round_settlement(
@@ -561,6 +560,9 @@ async def handle_answer(bot: Bot, event: MessageEvent):
             should_start_next_round=should_start_next_round,
             final_scoreboard=final_scoreboard,
         )
+        return
+
+    if ignored_previous_answer:
         return
 
     await bot.send_group_msg(

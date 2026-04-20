@@ -43,3 +43,6 @@ data/
 # Docker runtime data
 napcat/data/
 napcat/config/
+
+# codex
+.codex

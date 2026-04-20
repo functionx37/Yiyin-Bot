@@ -4,6 +4,7 @@
         "quotes": "群友语录",
         "idol": "爱抖露",
         "meme": "随机表情",
+        "react": "回应",
         "translate": "翻译",
         "choose": "随机选择",
         "vayu": "随蓝",
@@ -25,6 +26,7 @@
     "hidden": {
         "roleplay": "角色扮演",
         "mohe": "摩诃",
-        "yiyin.food.auto_collect": "自动食物收集"
+        "yiyin.food.auto_collect": "自动食物收集",
+        "yiyin.react.deny": "否定"
     }
 }

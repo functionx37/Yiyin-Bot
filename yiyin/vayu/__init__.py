@@ -23,10 +23,10 @@ from nonebot.rule import Rule
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 VAYU_CSV_PATH = PROJECT_ROOT / "assets" / "documents" / "vayu.csv"
 
-CHUNK_INTERVAL_SECONDS = 5
+CHUNK_INTERVAL_SECONDS = 10
 READ_ANSWER_DELAY_SECONDS = 30
 AUTO_REVEAL_SECONDS = 120
-MAX_CHUNKS = 7
+MAX_CHUNKS = 5
 PUNCT_BIAS = 1
 ANSWER_PREFIX = "%"
 SESSION_ROUNDS = 5

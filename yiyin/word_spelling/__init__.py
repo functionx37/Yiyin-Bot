@@ -15,9 +15,10 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 
+from yiyin.word_spelling.explain import explain_dqxm_word
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PINYIN_DIR = PROJECT_ROOT / "assets" / "documents" / "pinyin"
-DATA_DIR = PROJECT_ROOT / "data" / "word_spelling"
 
 MAX_COUNT = 100
 DIRECT_SEND_THRESHOLD = 10
@@ -26,18 +27,15 @@ CHUNK_SIZE = 10
 
 class WordRule(TypedDict):
     pinyin_slots: list[str | list[str]]
-    data_file: Path
 
 
 # 可扩展规则：新增指令时只需补充配置项并注册 matcher
 WORD_RULES: dict[str, WordRule] = {
     "dqxm": {
         "pinyin_slots": ["d", "q", "x", "m"],
-        "data_file": DATA_DIR / "dqxm.json",
     },
     "ccb": {
         "pinyin_slots": [["c", "ch"], ["c", "ch"], "b"],
-        "data_file": DATA_DIR / "ccb.json",
     }
 }
 
@@ -61,15 +59,6 @@ def _load_pinyin_chars(pinyin_key: str) -> list[str]:
 
     _PINYIN_CACHE[pinyin_key] = chars
     return chars
-
-
-def _normalize_dynamic_pattern(pattern: str) -> str:
-    normalized = pattern.lower()
-    filename_chars = [
-        ch if ch.isalnum() else "_" for ch in normalized if ch.isascii()
-    ]
-    filename = "".join(filename_chars).strip("_")
-    return filename or "custom"
 
 
 def _parse_pinyin_pattern(pattern: str) -> tuple[list[str | list[str]] | None, str | None]:
@@ -136,36 +125,6 @@ def _generate_word(pinyin_slots: list[str | list[str]]) -> str:
     return "".join(chars)
 
 
-def _load_recorded_words(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, list):
-        return []
-
-    words: list[str] = []
-    for item in data:
-        if isinstance(item, str) and item:
-            words.append(item)
-    return words
-
-
-def _append_unique_words(path: Path, words: list[str]) -> None:
-    existing_words = _load_recorded_words(path)
-    seen = set(existing_words)
-    new_words = [word for word in words if word not in seen]
-    if not new_words:
-        return
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    merged = existing_words + new_words
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
-
-
 def _parse_count(args_text: str, command: str) -> tuple[int | None, str | None]:
     if not args_text:
         return 1, None
@@ -183,26 +142,25 @@ def _parse_count(args_text: str, command: str) -> tuple[int | None, str | None]:
     return count, None
 
 
-def _parse_dynamic_command_args(args_text: str) -> tuple[list[str | list[str]] | None, int | None, Path | None, str | None]:
+def _parse_dynamic_command_args(args_text: str) -> tuple[list[str | list[str]] | None, int | None, str | None]:
     parts = args_text.split()
     if not parts:
-        return None, None, None, "用法：/拼 <声母序列> [n]"
+        return None, None, "用法：/拼 <声母序列> [n]"
     if len(parts) > 2:
-        return None, None, None, "用法：/拼 <声母序列> [n]"
+        return None, None, "用法：/拼 <声母序列> [n]"
 
     pattern = parts[0]
     count_text = parts[1] if len(parts) == 2 else ""
 
     pinyin_slots, error = _parse_pinyin_pattern(pattern)
     if error:
-        return None, None, None, error
+        return None, None, error
 
     count, error = _parse_count(count_text, "拼")
     if error:
-        return None, None, None, error
+        return None, None, error
 
-    data_file = DATA_DIR / f"dynamic_{_normalize_dynamic_pattern(pattern)}.json"
-    return pinyin_slots, count, data_file, None
+    return pinyin_slots, count, None
 
 
 def _build_forward_nodes(bot_name: str, bot_uin: str, words: list[str]) -> list[dict]:
@@ -223,21 +181,52 @@ def _build_forward_nodes(bot_name: str, bot_uin: str, words: list[str]) -> list[
     return nodes
 
 
-async def _finish_with_words(
-    matcher,
+def _extract_message_id(response) -> int | None:
+    """从 OneBot 发送结果中提取 message_id。"""
+    if not isinstance(response, dict):
+        return None
+    message_id = response.get("message_id")
+    if message_id is not None:
+        return int(message_id)
+    data = response.get("data")
+    if isinstance(data, dict) and data.get("message_id") is not None:
+        return int(data["message_id"])
+    return None
+
+
+async def _send_words(
     bot: Bot,
     event: GroupMessageEvent,
     words: list[str],
-) -> None:
+) -> int | None:
     if len(words) <= DIRECT_SEND_THRESHOLD:
-        await matcher.finish("\n".join(words))
+        response = await bot.send(event, "\n".join(words))
+        return _extract_message_id(response)
 
     bot_info = await bot.get_login_info()
     bot_name = bot_info.get("nickname", "YiyinBot")
     bot_uin = str(bot.self_id)
     nodes = _build_forward_nodes(bot_name, bot_uin, words)
-    await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
-    await matcher.finish()
+    response = await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+    return _extract_message_id(response)
+
+
+async def _send_dqxm_explanation(
+    bot: Bot,
+    event: GroupMessageEvent,
+    words: list[str],
+    sent_message_id: int | None,
+) -> None:
+    """为 /dqxm 生成的单个词语补充一本正经胡说八道式解释。"""
+    if len(words) != 1 or sent_message_id is None:
+        return
+
+    explanation = await explain_dqxm_word(words[0])
+    if not explanation:
+        return
+
+    reply_msg = MessageSegment.reply(sent_message_id) + MessageSegment.text(explanation)
+    await bot.send(event, reply_msg)
 
 
 def _register_word_command(command: str):
@@ -252,8 +241,10 @@ def _register_word_command(command: str):
         assert count is not None
 
         words = [_generate_word(rule["pinyin_slots"]) for _ in range(count)]
-        _append_unique_words(rule["data_file"], words)
-        await _finish_with_words(matcher, bot, event, words)
+        sent_message_id = await _send_words(bot, event, words)
+        if command == "dqxm":
+            await _send_dqxm_explanation(bot, event, words, sent_message_id)
+        await matcher.finish()
 
 
 spell_matcher = on_command("拼", priority=10, block=True)
@@ -265,18 +256,17 @@ async def _handle_spell_command(
     event: GroupMessageEvent,
     args: Message = CommandArg(),
 ):
-    pinyin_slots, count, data_file, error = _parse_dynamic_command_args(
+    pinyin_slots, count, error = _parse_dynamic_command_args(
         args.extract_plain_text().strip()
     )
     if error:
         await spell_matcher.finish(error)
     assert pinyin_slots is not None
     assert count is not None
-    assert data_file is not None
 
     words = [_generate_word(pinyin_slots) for _ in range(count)]
-    _append_unique_words(data_file, words)
-    await _finish_with_words(spell_matcher, bot, event, words)
+    await _send_words(bot, event, words)
+    await spell_matcher.finish()
 
 
 for _command in WORD_RULES:

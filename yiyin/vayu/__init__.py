@@ -313,7 +313,7 @@ def _is_previous_round_answer(game: VayuGame, answer: str) -> bool:
 
 
 def _build_round_result_message(record: VayuRecord, winner_id: int | None = None):
-    summary = f"题面：{_question_surface(record)}\n答案：{record.answer}"
+    summary = f"题面：{_question_surface(record)}\n题底：{record.answer}"
     if winner_id is None:
         return summary
     return MessageSegment.at(winner_id) + MessageSegment.text(

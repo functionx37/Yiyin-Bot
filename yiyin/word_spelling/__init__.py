@@ -76,8 +76,8 @@ def _parse_pinyin_pattern(pattern: str) -> tuple[list[str | list[str]] | None, s
     normalized = pattern.strip().lower()
     if not normalized:
         return None, "用法：/拼 <声母序列> [n]"
-    if normalized.startswith("/"):
-        return None, f"声母序列不能以 / 开头：{pattern}"
+    if normalized[0] in {"/", "'"}:
+        return None, f"声母序列不能以 {normalized[0]} 开头：{pattern}"
 
     tokens: list[str] = []
     linked_with_previous: list[bool] = []
@@ -99,13 +99,17 @@ def _parse_pinyin_pattern(pattern: str) -> tuple[list[str | list[str]] | None, s
             break
 
         separator = normalized[index]
-        if separator != "/":
+        if separator == "'":
+            index += 1
+            if index >= len(normalized):
+                return None, f"声母序列不能以 ' 结尾：{pattern}"
             continue
 
-        next_token_linked = True
-        index += 1
-        if index >= len(normalized):
-            return None, f"声母序列不能以 / 结尾：{pattern}"
+        if separator == "/":
+            next_token_linked = True
+            index += 1
+            if index >= len(normalized):
+                return None, f"声母序列不能以 / 结尾：{pattern}"
 
     slots: list[str | list[str]] = []
     current_slot: list[str] = [tokens[0]]

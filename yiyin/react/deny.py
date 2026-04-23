@@ -1,6 +1,6 @@
 """
 否定回应（react 子模块，隐藏功能，需 /启用 否定）
-- 当群友消息以 但/但是 开头时，有 25% 概率回复：
+- 当群友消息以 但 开头时，有 50% 概率回复：
   我们不认为<句子>,您囍疯。
 - 默认关闭，需群内 /启用 否定 后生效
 """
@@ -14,20 +14,20 @@ from nonebot.rule import Rule
 from yiyin.toggle import is_feature_enabled
 
 _FEATURE_KEY = "yiyin.react.deny"
-_REPLY_PROBABILITY = 0.25
-_PREFIXES = ("但是", "但")
+_REPLY_PROBABILITY = 0.5
+_PREFIX = "但"
 
 
 def _extract_sentence(text: str) -> str | None:
-    """提取 但/但是 后面的句子，空内容返回 None。"""
+    """提取 但 后面的句子，空内容返回 None。"""
     normalized = text.strip()
-    for prefix in _PREFIXES:
-        if normalized.startswith(prefix):
-            sentence = normalized[len(prefix) :].strip()
-            if sentence.startswith(("，", ",")):
-                sentence = sentence[1:].strip()
-            return sentence or None
-    return None
+    if not normalized.startswith(_PREFIX):
+        return None
+
+    sentence = normalized[len(_PREFIX) :].strip()
+    if sentence.startswith(("，", ",")):
+        sentence = sentence[1:].strip()
+    return sentence or None
 
 
 def _not_from_bot(event: GroupMessageEvent) -> bool:
@@ -41,7 +41,7 @@ async def _deny_enabled(event: GroupMessageEvent) -> bool:
 
 
 def _deny_trigger(event: GroupMessageEvent) -> bool:
-    """消息以 但/但是 开头且后面有正文。"""
+    """消息以 但 开头且后面有正文。"""
     return _extract_sentence(event.get_plaintext()) is not None
 
 

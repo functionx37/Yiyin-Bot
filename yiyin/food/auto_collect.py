@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import base64
 import tempfile
 from collections import deque
 from pathlib import Path
@@ -115,17 +116,30 @@ def _is_small_file_sticker(size_bytes: int, width: int | None, height: int | Non
     return max_dim <= _STICKER_MAX_DIM_RELAXED and min_dim / max_dim >= _STICKER_ASPECT_RATIO_MIN
 
 
-async def _fetch_image_info(url: str) -> tuple[bool, int | None, int | None, int]:
+def _build_data_url(image_bytes: bytes, content_type: str | None) -> str:
+    """将图片二进制转为 data URL，避免模型侧再次拉取外链图片。"""
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    if not mime.startswith("image/"):
+        mime = "image/png"
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+async def _fetch_image_info(
+    url: str,
+) -> tuple[bool, int | None, int | None, int, bytes | None, str | None]:
     """
     下载图片并检测：是否 GIF、宽度、高度、文件大小。
-    返回 (is_gif, width, height, size_bytes)，解析失败时 width/height 为 None。
+    返回 (is_gif, width, height, size_bytes, content, content_type)，
+    解析失败时 width/height 为 None。
     """
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
             resp = await client.get(url)
         if resp.status_code != 200:
-            return False, None, None, 0
+            return False, None, None, 0, None, None
         content = resp.content
+        content_type = resp.headers.get("content-type")
         size_bytes = len(content)
         with tempfile.TemporaryDirectory(prefix="image_recog_") as tmpdir:
             suffix = ".bin"
@@ -154,10 +168,10 @@ async def _fetch_image_info(url: str) -> tuple[bool, int | None, int | None, int
                     width, height = img.size
             except Exception:
                 pass
-        return is_gif, width, height, size_bytes
+        return is_gif, width, height, size_bytes, content, content_type
     except Exception:
         logger.debug("图片下载检测失败: %s", url[:80])
-        return False, None, None, 0
+        return False, None, None, 0, None, None
 
 
 def _extract_image_urls(event: GroupMessageEvent) -> list[str]:
@@ -222,13 +236,15 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
             break
 
     # [3] 下载并检测
-    is_gif, width, height, size_bytes = await _fetch_image_info(image_url)
+    is_gif, width, height, size_bytes, image_bytes, content_type = await _fetch_image_info(image_url)
     if is_gif:
         return  # [3a] GIF 动图一律排除（多为表情包）
     if width is not None and height is not None and _is_sticker_like(width, height):
         return  # [3b] 小尺寸接近正方形 → 疑似表情包
     if _is_small_file_sticker(size_bytes, width, height):
         return  # [3c] 文件很小 + 接近正方形 → 疑似表情包
+    if not image_bytes:
+        return
 
     if not await _claim_image_for_recognition(image_url):
         return  # 该图已识别过，跳过
@@ -238,7 +254,10 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
             "role": "user",
             "content": [
                 {"type": "text", "text": FOOD_PROMPT},
-                {"type": "image_url", "image_url": {"url": image_url}},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _build_data_url(image_bytes, content_type)},
+                },
             ],
         }
     ]
@@ -250,7 +269,7 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
                 model=IMAGE_RECOG_MODEL,
                 temperature=0.1,
                 max_tokens=64,
-                timeout=25,
+                timeout=45,
             )
             if reply:
                 break

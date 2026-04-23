@@ -1,5 +1,6 @@
 """
 选择回应（react 子模块）
+- 匹配以 # 开头且包含「还是」的多选一结构
 - 匹配以 # 开头的「句子1 + 词 + 不 + 相同词 + 句子2」结构
 - 以最长相同前后缀作为词
 - 引用原消息后按概率回复
@@ -17,6 +18,19 @@ from nonebot.rule import Rule
 def _not_from_bot(event: GroupMessageEvent) -> bool:
     """忽略机器人自己的消息。"""
     return str(event.self_id) != str(event.user_id)
+
+
+def _extract_alternative_choices(text: str) -> list[str] | None:
+    """提取 #选项1还是选项2 结构中的备选项。"""
+    if not text.startswith("#"):
+        return None
+
+    content = text[1:].strip()
+    if "还是" not in content:
+        return None
+
+    choices = [part.strip() for part in content.split("还是") if part.strip()]
+    return choices if len(choices) >= 2 else None
 
 
 def _extract_pick_parts(text: str) -> tuple[str, str, str] | None:
@@ -61,9 +75,23 @@ def _pick_reply(sentence1: str, word: str, sentence2: str) -> str:
     return f"{sentence1}不{word}{sentence2}"
 
 
+def _build_pick_reply(text: str) -> str | None:
+    """根据 pick 规则生成回复文本。"""
+    choices = _extract_alternative_choices(text)
+    if choices is not None:
+        return random.choice(choices)
+
+    parts = _extract_pick_parts(text)
+    if parts is None:
+        return None
+
+    sentence1, word, sentence2 = parts
+    return _pick_reply(sentence1, word, sentence2)
+
+
 def _pick_trigger(event: GroupMessageEvent) -> bool:
     """只在消息成功匹配 pick 结构时触发。"""
-    return _extract_pick_parts(event.get_plaintext().strip()) is not None
+    return _build_pick_reply(event.get_plaintext().strip()) is not None
 
 
 pick_matcher = on_message(
@@ -76,12 +104,9 @@ pick_matcher = on_message(
 @pick_matcher.handle()
 async def handle_pick(event: GroupMessageEvent):
     """引用原消息并发送 pick 结果。"""
-    parts = _extract_pick_parts(event.get_plaintext().strip())
-    if parts is None:
+    reply_text = _build_pick_reply(event.get_plaintext().strip())
+    if reply_text is None:
         return
 
-    sentence1, word, sentence2 = parts
-    reply = MessageSegment.reply(event.message_id) + Message(
-        _pick_reply(sentence1, word, sentence2)
-    )
+    reply = MessageSegment.reply(event.message_id) + Message(reply_text)
     await pick_matcher.finish(reply)

@@ -14,7 +14,7 @@ from nonebot import on_message
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
 
-from yiyin.react.pick import _extract_pick_parts
+from yiyin.react.pick import _build_pick_reply
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RESPONSES_PATH = PROJECT_ROOT / "assets" / "documents" / "react.json"
@@ -43,7 +43,7 @@ def _not_from_bot(event: GroupMessageEvent) -> bool:
 def _react_trigger(event: GroupMessageEvent) -> bool:
     """匹配 # 开头但不能触发 pick 的文本消息。"""
     text = event.get_plaintext().strip()
-    return text.startswith("#") and len(text) > 1 and _extract_pick_parts(text) is None
+    return text.startswith("#") and len(text) > 1 and _build_pick_reply(text) is None
 
 
 react_matcher = on_message(

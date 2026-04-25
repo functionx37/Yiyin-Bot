@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import time
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import jieba
 from nonebot import on_message
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
 
 from yiyin.toggle import is_feature_enabled
@@ -91,27 +92,34 @@ def _group_state(group_id: str) -> dict:
         {
             "last_signature": None,
             "last_count": 0,
+            "last_uniform_reply_id": None,
             "recent_repeats": {},
             "random_failures": 0,
         },
     )
 
 
-def _message_signature(message: Message) -> str | None:
-    """仅为文字和 QQ 系统表情生成可比较签名。"""
+def _build_repeat_payload(message: Message) -> tuple[Message | None, str | None]:
+    """提取可安全复读的消息，并同步生成比较签名。"""
+    repeat_message = Message()
     parts: list[list[str]] = []
     for segment in message:
         if segment.type == "text":
-            parts.append(["text", segment.data.get("text", "")])
+            text = segment.data.get("text", "")
+            repeat_message.append(MessageSegment.text(text))
+            parts.append(["text", text])
             continue
         if segment.type == "face":
-            parts.append(["face", str(segment.data.get("id", ""))])
+            face_id = str(segment.data.get("id", ""))
+            repeat_message.append(MessageSegment.face(face_id))
+            parts.append(["face", face_id])
             continue
-        return None
+        return None, None
 
     if not parts:
-        return None
-    return json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
+        return None, None
+    signature = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
+    return repeat_message, signature
 
 
 def _prune_recent_repeats(group_state: dict, now: float) -> None:
@@ -132,19 +140,25 @@ def _prune_recent_repeats(group_state: dict, now: float) -> None:
             recent.pop(signature, None)
 
 
-def _update_repeat_counter(group_state: dict, signature: str | None) -> None:
+def _update_repeat_counter(
+    group_state: dict, signature: str | None, reply_message_id: int | None
+) -> None:
     """更新连续相同消息计数。"""
     if signature is None:
         group_state["last_signature"] = None
         group_state["last_count"] = 0
+        group_state["last_uniform_reply_id"] = None
         return
 
     if group_state.get("last_signature") == signature:
         group_state["last_count"] = int(group_state.get("last_count", 0)) + 1
+        if group_state.get("last_uniform_reply_id") != reply_message_id:
+            group_state["last_uniform_reply_id"] = None
         return
 
     group_state["last_signature"] = signature
     group_state["last_count"] = 1
+    group_state["last_uniform_reply_id"] = reply_message_id
 
 
 def _should_repeat(group_state: dict, signature: str | None, now: float) -> bool:
@@ -220,13 +234,19 @@ async def handle_repetition(bot: Bot, event: GroupMessageEvent):
     group_state = _group_state(group_id)
     now = time.time()
 
-    signature = _message_signature(event.message)
-    _update_repeat_counter(group_state, signature)
+    repeat_message, signature = _build_repeat_payload(event.message)
+    reply_message_id = event.reply.message_id if event.reply else None
+    _update_repeat_counter(group_state, signature, reply_message_id)
     _mark_state_dirty()
 
     if _should_repeat(group_state, signature, now):
         _save_state()
-        await bot.send(event, Message(event.message))
+        await asyncio.sleep(5)
+        outgoing = repeat_message
+        uniform_reply_id = group_state.get("last_uniform_reply_id")
+        if uniform_reply_id is not None:
+            outgoing = MessageSegment.reply(uniform_reply_id) + outgoing
+        await bot.send(event, outgoing)
         return
 
     shuffled_reply = _build_shuffled_reply(event.get_plaintext())

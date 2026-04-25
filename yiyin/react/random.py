@@ -1,5 +1,5 @@
 """
-乱序复读功能（react 子模块，隐藏功能，需 /启用 复读）
+乱序复读功能（react 子模块，隐藏功能，需 /启用 乱序复读）
 - 对可处理文本维护独立渐进概率
 - 状态单独保存在 data/react/random.json
 - 与重复复读分离；若当前消息已触发重复复读，则本次不再乱序复读
@@ -21,7 +21,7 @@ from yiyin.toggle import is_feature_enabled
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 STATE_PATH = PROJECT_ROOT / "data" / "react" / "random.json"
 
-_FEATURE_KEY = "yiyin.react.repetition"
+_FEATURE_KEY = "yiyin.react.random"
 _RANDOM_BASE_PROBABILITY = 0.00015
 _RANDOM_INCREMENT = 0.00015
 _RANDOM_MAX_PROBABILITY = 0.3
@@ -106,13 +106,13 @@ def _not_from_bot(event: GroupMessageEvent) -> bool:
     return str(event.self_id) != str(event.user_id)
 
 
-async def _repetition_enabled(event: GroupMessageEvent) -> bool:
-    """仅在当前群启用了复读功能时触发。"""
+async def _random_enabled(event: GroupMessageEvent) -> bool:
+    """仅在当前群启用了乱序复读功能时触发。"""
     return is_feature_enabled(_FEATURE_KEY, str(event.group_id))
 
 
 random_matcher = on_message(
-    Rule(_not_from_bot, _repetition_enabled),
+    Rule(_not_from_bot, _random_enabled),
     priority=61,
     block=False,
 )

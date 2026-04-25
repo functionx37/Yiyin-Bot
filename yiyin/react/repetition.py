@@ -28,19 +28,16 @@ _SIGNATURE_TYPES = {"cite", "text", "emoji", "at"}
 def _load_state() -> dict:
     """从文件读取复读触发记录。"""
     if not STATE_PATH.exists():
-        return {"groups": {}}
+        return {}
 
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
-        return {"groups": {}}
+        return {}
 
     if not isinstance(data, dict):
-        return {"groups": {}}
-    groups = data.get("groups")
-    if not isinstance(groups, dict):
-        data["groups"] = {}
+        return {}
     return data
 
 
@@ -155,13 +152,7 @@ def _normalize_signature(
 def _last_trigger_signature(group_id: str) -> list[dict[str, str | int]] | None:
     """读取本群上次成功发送的结构化签名。"""
     state = _load_state()
-    groups = state.get("groups", {})
-    if not isinstance(groups, dict):
-        return None
-    group_state = groups.get(group_id, {})
-    if not isinstance(group_state, dict):
-        return None
-    return _normalize_signature(group_state.get("last_trigger_signature"))
+    return _normalize_signature(state.get(group_id))
 
 
 def _record_trigger_signature(
@@ -169,15 +160,7 @@ def _record_trigger_signature(
 ) -> None:
     """在成功触发复读后写入本群最近一次发送签名。"""
     state = _load_state()
-    groups = state.setdefault("groups", {})
-    if not isinstance(groups, dict):
-        groups = {}
-        state["groups"] = groups
-    group_state = groups.setdefault(group_id, {})
-    if not isinstance(group_state, dict):
-        group_state = {}
-        groups[group_id] = group_state
-    group_state["last_trigger_signature"] = signature
+    state[group_id] = signature
     _save_state(state)
 
 

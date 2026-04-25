@@ -28,6 +28,7 @@
         "mohe": "摩诃",
         "yiyin.food.auto_collect": "自动食物收集",
         "yiyin.react.deny": "否定",
-        "yiyin.react.repetition": "复读"
+        "yiyin.react.repetition": "复读",
+        "yiyin.react.random": "乱序复读"
     }
 }

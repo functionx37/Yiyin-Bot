@@ -1,19 +1,16 @@
 """
-复读功能（react 子模块，隐藏功能，需 /启用 复读）
-- 若群友连续发送两条完全相同的文字/QQ 系统表情消息，机器人复读一次
-- 同一条消息在短时间内只复读一次，避免循环复读
-- 另外对每个群维护独立的渐进随机概率，平均约每 100 条可处理消息乱序复读一次
+重复复读功能（react 子模块，隐藏功能，需 /启用 复读）
+- 若群友连续发送两条完全相同的可复读消息，机器人复读一次
+- 仅在成功触发复读后写入 data/react/repetition.json
+- 若本次预备触发的签名与上次成功触发相同，则不再触发
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
-import random
-import time
 from pathlib import Path
+from typing import Any
 
-import jieba
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
@@ -21,80 +18,46 @@ from nonebot.rule import Rule
 from yiyin.toggle import is_feature_enabled
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = PROJECT_ROOT / "data" / "react" / "repetition"
-STATE_PATH = DATA_DIR / "state.json"
+STATE_PATH = PROJECT_ROOT / "data" / "react" / "repetition.json"
 
 _FEATURE_KEY = "yiyin.react.repetition"
-_REPEAT_COOLDOWN_SECONDS = 600
-_RANDOM_BASE_PROBABILITY = 0.00015
-_RANDOM_INCREMENT = 0.00015
-_RANDOM_MAX_PROBABILITY = 0.3
-_RECENT_REPEAT_LIMIT = 100
-_STATE_SAVE_INTERVAL_SECONDS = 5
-
-_state_cache: dict | None = None
-_state_dirty = False
-_last_save_time = 0.0
+_candidate_cache: dict[str, dict[str, Any]] = {}
 
 
 def _load_state() -> dict:
-    """读取运行时状态，文件损坏时回退为空状态。"""
-    global _state_cache
-    if _state_cache is not None:
-        return _state_cache
-
+    """从文件读取复读触发记录。"""
     if not STATE_PATH.exists():
-        _state_cache = {"groups": {}}
-        return _state_cache
+        return {"groups": {}}
 
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
-        data = {"groups": {}}
+        return {"groups": {}}
 
     if not isinstance(data, dict):
-        data = {"groups": {}}
-    data.setdefault("groups", {})
-    _state_cache = data
-    return _state_cache
+        return {"groups": {}}
+    groups = data.get("groups")
+    if not isinstance(groups, dict):
+        data["groups"] = {}
+    return data
 
 
-def _mark_state_dirty() -> None:
-    """标记运行时状态已变更。"""
-    global _state_dirty
-    _state_dirty = True
-
-
-def _save_state(*, force: bool = False) -> None:
-    """按需保存运行时状态，避免每条消息都落盘。"""
-    global _state_dirty, _last_save_time
-    if not _state_dirty:
-        return
-
-    now = time.time()
-    if not force and now - _last_save_time < _STATE_SAVE_INTERVAL_SECONDS:
-        return
-
-    state = _load_state()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+def _save_state(state: dict) -> None:
+    """将复读触发记录写回文件。"""
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-    _state_dirty = False
-    _last_save_time = now
 
 
-def _group_state(group_id: str) -> dict:
-    """获取单个群的状态字典。"""
-    groups = _load_state().setdefault("groups", {})
-    return groups.setdefault(
+def _group_candidate(group_id: str) -> dict[str, Any]:
+    """获取群内当前连续消息候选，仅保存在内存中。"""
+    return _candidate_cache.setdefault(
         group_id,
         {
             "last_signature": None,
             "last_count": 0,
             "last_uniform_reply_id": None,
-            "recent_repeats": {},
-            "random_failures": 0,
         },
     )
 
@@ -127,6 +90,62 @@ def _build_repeat_payload(message: Message) -> tuple[Message | None, str | None]
     return repeat_message, signature
 
 
+def _update_repeat_candidate(
+    candidate: dict[str, Any], signature: str | None, reply_message_id: int | None
+) -> None:
+    """更新当前连续消息候选。"""
+    if signature is None:
+        candidate["last_signature"] = None
+        candidate["last_count"] = 0
+        candidate["last_uniform_reply_id"] = None
+        return
+
+    if candidate.get("last_signature") == signature:
+        candidate["last_count"] = int(candidate.get("last_count", 0)) + 1
+        if candidate.get("last_uniform_reply_id") != reply_message_id:
+            candidate["last_uniform_reply_id"] = None
+        return
+
+    candidate["last_signature"] = signature
+    candidate["last_count"] = 1
+    candidate["last_uniform_reply_id"] = reply_message_id
+
+
+def _should_repeat_now(candidate: dict[str, Any], signature: str | None) -> bool:
+    """仅在第二条连续相同消息到来时进入预备触发。"""
+    if signature is None:
+        return False
+    return int(candidate.get("last_count", 0)) == 2
+
+
+def _last_trigger_signature(group_id: str) -> str | None:
+    """读取本群上次成功触发的复读签名。"""
+    state = _load_state()
+    groups = state.get("groups", {})
+    if not isinstance(groups, dict):
+        return None
+    group_state = groups.get(group_id, {})
+    if not isinstance(group_state, dict):
+        return None
+    value = group_state.get("last_trigger_signature")
+    return value if isinstance(value, str) else None
+
+
+def _record_trigger_signature(group_id: str, signature: str) -> None:
+    """在成功触发复读后写入本群最近一次触发签名。"""
+    state = _load_state()
+    groups = state.setdefault("groups", {})
+    if not isinstance(groups, dict):
+        groups = {}
+        state["groups"] = groups
+    group_state = groups.setdefault(group_id, {})
+    if not isinstance(group_state, dict):
+        group_state = {}
+        groups[group_id] = group_state
+    group_state["last_trigger_signature"] = signature
+    _save_state(state)
+
+
 def _should_send_empty_reply_easter_egg(
     repeat_message: Message | None, uniform_reply_id: int | None
 ) -> bool:
@@ -146,94 +165,6 @@ def _should_send_empty_reply_easter_egg(
     return len(at_targets) == 1
 
 
-def _prune_recent_repeats(group_state: dict, now: float) -> None:
-    """清理过期的复读冷却记录。"""
-    recent = group_state.setdefault("recent_repeats", {})
-    expired = [
-        signature
-        for signature, ts in recent.items()
-        if now - float(ts) >= _REPEAT_COOLDOWN_SECONDS
-    ]
-    for signature in expired:
-        recent.pop(signature, None)
-
-    if len(recent) > _RECENT_REPEAT_LIMIT:
-        for signature, _ in sorted(recent.items(), key=lambda item: item[1])[
-            : len(recent) - _RECENT_REPEAT_LIMIT
-        ]:
-            recent.pop(signature, None)
-
-
-def _update_repeat_counter(
-    group_state: dict, signature: str | None, reply_message_id: int | None
-) -> None:
-    """更新连续相同消息计数。"""
-    if signature is None:
-        group_state["last_signature"] = None
-        group_state["last_count"] = 0
-        group_state["last_uniform_reply_id"] = None
-        return
-
-    if group_state.get("last_signature") == signature:
-        group_state["last_count"] = int(group_state.get("last_count", 0)) + 1
-        if group_state.get("last_uniform_reply_id") != reply_message_id:
-            group_state["last_uniform_reply_id"] = None
-        return
-
-    group_state["last_signature"] = signature
-    group_state["last_count"] = 1
-    group_state["last_uniform_reply_id"] = reply_message_id
-
-
-def _should_repeat(group_state: dict, signature: str | None, now: float) -> bool:
-    """判断当前消息是否应该触发复读。"""
-    if signature is None:
-        return False
-
-    _prune_recent_repeats(group_state, now)
-    if int(group_state.get("last_count", 0)) != 2:
-        return False
-    if signature in group_state.get("recent_repeats", {}):
-        return False
-
-    group_state.setdefault("recent_repeats", {})[signature] = now
-    return True
-
-
-def _should_trigger_shuffle(group_state: dict) -> bool:
-    """按渐进概率判断是否触发乱序复读。"""
-    failures = int(group_state.get("random_failures", 0))
-    probability = min(
-        _RANDOM_BASE_PROBABILITY + failures * _RANDOM_INCREMENT,
-        _RANDOM_MAX_PROBABILITY,
-    )
-    if random.random() < probability:
-        group_state["random_failures"] = 0
-        return True
-
-    group_state["random_failures"] = failures + 1
-    return False
-
-
-def _build_shuffled_reply(text: str) -> str | None:
-    """对文本分词后打乱顺序，尽量避免和原文相同。"""
-    normalized = text.strip()
-    if not normalized:
-        return None
-
-    words = [word for word in jieba.lcut(normalized) if word and not word.isspace()]
-    if len(words) < 2:
-        return None
-
-    shuffled = words[:]
-    for _ in range(8):
-        random.shuffle(shuffled)
-        candidate = "".join(shuffled).strip()
-        if candidate and candidate != normalized:
-            return candidate
-    return None
-
-
 def _not_from_bot(event: GroupMessageEvent) -> bool:
     """忽略机器人自己的消息。"""
     return str(event.self_id) != str(event.user_id)
@@ -246,44 +177,35 @@ async def _repetition_enabled(event: GroupMessageEvent) -> bool:
 
 repetition_matcher = on_message(
     Rule(_not_from_bot, _repetition_enabled),
-    priority=61,
+    priority=60,
     block=False,
 )
 
 
 @repetition_matcher.handle()
 async def handle_repetition(bot: Bot, event: GroupMessageEvent):
-    """处理群消息复读与乱序复读。"""
+    """处理连续相同消息的复读。"""
     group_id = str(event.group_id)
-    group_state = _group_state(group_id)
-    now = time.time()
+    candidate = _group_candidate(group_id)
 
     repeat_message, signature = _build_repeat_payload(event.message)
     reply_message_id = event.reply.message_id if event.reply else None
-    _update_repeat_counter(group_state, signature, reply_message_id)
-    _mark_state_dirty()
+    _update_repeat_candidate(candidate, signature, reply_message_id)
 
-    if _should_repeat(group_state, signature, now):
-        _save_state()
-        await asyncio.sleep(5)
-        uniform_reply_id = group_state.get("last_uniform_reply_id")
-        if _should_send_empty_reply_easter_egg(repeat_message, uniform_reply_id):
-            outgoing = MessageSegment.reply(uniform_reply_id) + MessageSegment.text("")
-        else:
-            outgoing = repeat_message
-            if uniform_reply_id is not None:
-                outgoing = MessageSegment.reply(uniform_reply_id) + outgoing
-        await bot.send(event, outgoing)
+    if not _should_repeat_now(candidate, signature):
+        return
+    if signature == _last_trigger_signature(group_id):
         return
 
-    shuffled_reply = _build_shuffled_reply(event.get_plaintext())
-    if shuffled_reply is None:
-        _save_state()
-        return
+    uniform_reply_id = candidate.get("last_uniform_reply_id")
+    if _should_send_empty_reply_easter_egg(repeat_message, uniform_reply_id):
+        outgoing = MessageSegment.reply(uniform_reply_id) + MessageSegment.text("")
+    else:
+        outgoing = repeat_message
+        if uniform_reply_id is not None:
+            outgoing = MessageSegment.reply(uniform_reply_id) + outgoing
 
-    if not _should_trigger_shuffle(group_state):
-        _save_state()
-        return
-
-    _save_state()
-    await bot.send(event, shuffled_reply)
+    setattr(event, "_yiyin_repetition_triggered", True)
+    await bot.send(event, outgoing)
+    assert signature is not None
+    _record_trigger_signature(group_id, signature)

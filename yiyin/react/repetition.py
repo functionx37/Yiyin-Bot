@@ -1,8 +1,8 @@
 """
 重复复读功能（react 子模块，隐藏功能，需 /启用 复读）
-- 若群友连续发送两条完全相同的可复读消息，机器人复读一次
+- 若群友连续发送两条除引用外完全相同的可复读消息，机器人复读一次
 - 仅在成功触发复读后写入 data/react/repetition.json
-- 若本次预备触发的签名与上次成功触发相同，则不再触发
+- 数据以结构化段列表保存，显式记录 cite / text / emoji / at
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ STATE_PATH = PROJECT_ROOT / "data" / "react" / "repetition.json"
 
 _FEATURE_KEY = "yiyin.react.repetition"
 _candidate_cache: dict[str, dict[str, Any]] = {}
+_SIGNATURE_TYPES = {"cite", "text", "emoji", "at"}
 
 
 def _load_state() -> dict:
@@ -62,36 +63,39 @@ def _group_candidate(group_id: str) -> dict[str, Any]:
     )
 
 
-def _build_repeat_payload(message: Message) -> tuple[Message | None, str | None]:
-    """提取可安全复读的消息，并同步生成比较签名。"""
-    repeat_message = Message()
-    parts: list[list[str]] = []
+def _make_segment(seg_type: str, content: str | int) -> dict[str, str | int]:
+    """构造标准化消息段。"""
+    return {"type": seg_type, "content": content}
+
+
+def _build_body_signature(
+    message: Message, self_id: str | int
+) -> list[dict[str, str | int]] | None:
+    """提取用于触发复读的正文签名，自动去除 @机器人。"""
+    parts: list[dict[str, str | int]] = []
     for segment in message:
         if segment.type == "text":
             text = segment.data.get("text", "")
-            repeat_message.append(MessageSegment.text(text))
-            parts.append(["text", text])
+            parts.append(_make_segment("text", text))
             continue
         if segment.type == "face":
             face_id = str(segment.data.get("id", ""))
-            repeat_message.append(MessageSegment.face(face_id))
-            parts.append(["face", face_id])
+            parts.append(_make_segment("emoji", face_id))
             continue
         if segment.type == "at":
             target = str(segment.data.get("qq", ""))
-            repeat_message.append(MessageSegment.at(target))
-            parts.append(["at", target])
+            if target == str(self_id):
+                continue
+            parts.append(_make_segment("at", target))
             continue
-        return None, None
-
-    if not parts:
-        return None, None
-    signature = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
-    return repeat_message, signature
+        return None
+    return parts
 
 
 def _update_repeat_candidate(
-    candidate: dict[str, Any], signature: str | None, reply_message_id: int | None
+    candidate: dict[str, Any],
+    signature: list[dict[str, str | int]] | None,
+    reply_message_id: int | None,
 ) -> None:
     """更新当前连续消息候选。"""
     if signature is None:
@@ -111,15 +115,45 @@ def _update_repeat_candidate(
     candidate["last_uniform_reply_id"] = reply_message_id
 
 
-def _should_repeat_now(candidate: dict[str, Any], signature: str | None) -> bool:
+def _should_repeat_now(
+    candidate: dict[str, Any], signature: list[dict[str, str | int]] | None
+) -> bool:
     """仅在第二条连续相同消息到来时进入预备触发。"""
     if signature is None:
         return False
     return int(candidate.get("last_count", 0)) == 2
 
 
-def _last_trigger_signature(group_id: str) -> str | None:
-    """读取本群上次成功触发的复读签名。"""
+def _normalize_signature(
+    raw: Any,
+) -> list[dict[str, str | int]] | None:
+    """校验并标准化从文件读取的签名结构。"""
+    if not isinstance(raw, list):
+        return None
+
+    normalized: list[dict[str, str | int]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return None
+        seg_type = item.get("type")
+        if not isinstance(seg_type, str) or seg_type not in _SIGNATURE_TYPES:
+            return None
+        if "content" not in item:
+            return None
+        content = item["content"]
+        if seg_type == "cite":
+            if not isinstance(content, (str, int)):
+                return None
+            normalized.append(_make_segment("cite", content))
+            continue
+        if not isinstance(content, str):
+            return None
+        normalized.append(_make_segment(seg_type, content))
+    return normalized
+
+
+def _last_trigger_signature(group_id: str) -> list[dict[str, str | int]] | None:
+    """读取本群上次成功发送的结构化签名。"""
     state = _load_state()
     groups = state.get("groups", {})
     if not isinstance(groups, dict):
@@ -127,12 +161,13 @@ def _last_trigger_signature(group_id: str) -> str | None:
     group_state = groups.get(group_id, {})
     if not isinstance(group_state, dict):
         return None
-    value = group_state.get("last_trigger_signature")
-    return value if isinstance(value, str) else None
+    return _normalize_signature(group_state.get("last_trigger_signature"))
 
 
-def _record_trigger_signature(group_id: str, signature: str) -> None:
-    """在成功触发复读后写入本群最近一次触发签名。"""
+def _record_trigger_signature(
+    group_id: str, signature: list[dict[str, str | int]]
+) -> None:
+    """在成功触发复读后写入本群最近一次发送签名。"""
     state = _load_state()
     groups = state.setdefault("groups", {})
     if not isinstance(groups, dict):
@@ -146,23 +181,101 @@ def _record_trigger_signature(group_id: str, signature: str) -> None:
     _save_state(state)
 
 
-def _should_send_empty_reply_easter_egg(
-    repeat_message: Message | None, uniform_reply_id: int | None
+def _strip_cite(
+    signature: list[dict[str, str | int]],
+) -> list[dict[str, str | int]]:
+    """移除 cite 段，仅保留正文签名。"""
+    return [seg for seg in signature if seg["type"] != "cite"]
+
+
+def _build_prepublish_signature(
+    body_signature: list[dict[str, str | int]], uniform_reply_id: int | None
+) -> list[dict[str, str | int]]:
+    """生成预发布消息的结构化签名。"""
+    signature: list[dict[str, str | int]] = []
+    if uniform_reply_id is not None:
+        signature.append(_make_segment("cite", uniform_reply_id))
+    signature.extend(body_signature)
+    return signature
+
+
+def _body_is_empty(body_signature: list[dict[str, str | int]]) -> bool:
+    """判断正文是否完全为空。"""
+    for seg in body_signature:
+        if seg["type"] == "text":
+            if seg["content"] != "":
+                return False
+            continue
+        return False
+    return True
+
+
+def _body_has_only_at(body_signature: list[dict[str, str | int]]) -> bool:
+    """判断正文是否仅包含 at（允许夹杂空字符串 text）。"""
+    saw_at = False
+    for seg in body_signature:
+        if seg["type"] == "at":
+            saw_at = True
+            continue
+        if seg["type"] == "text" and seg["content"] == "":
+            continue
+        return False
+    return saw_at
+
+
+def _finalize_outgoing_signature(
+    prepublish_signature: list[dict[str, str | int]],
+) -> list[dict[str, str | int]] | None:
+    """按发送规则裁剪预发布签名。"""
+    has_cite = any(seg["type"] == "cite" for seg in prepublish_signature)
+    body_signature = _strip_cite(prepublish_signature)
+
+    if _body_is_empty(body_signature):
+        if not has_cite:
+            return None
+        return [seg for seg in prepublish_signature if seg["type"] == "cite"]
+
+    if has_cite and _body_has_only_at(body_signature):
+        return [seg for seg in prepublish_signature if seg["type"] == "cite"]
+
+    return prepublish_signature
+
+
+def _build_message_from_signature(
+    signature: list[dict[str, str | int]]
+) -> Message:
+    """将结构化签名还原为 OneBot 消息。"""
+    message = Message()
+    has_non_cite_segment = False
+    for seg in signature:
+        seg_type = seg["type"]
+        content = seg["content"]
+        if seg_type == "cite":
+            message.append(MessageSegment.reply(content))
+            continue
+        has_non_cite_segment = True
+        if seg_type == "text":
+            message.append(MessageSegment.text(str(content)))
+            continue
+        if seg_type == "emoji":
+            message.append(MessageSegment.face(str(content)))
+            continue
+        if seg_type == "at":
+            message.append(MessageSegment.at(str(content)))
+
+    if not has_non_cite_segment:
+        message.append(MessageSegment.text(""))
+    return message
+
+
+def _same_body_as_last_trigger(
+    group_id: str, body_signature: list[dict[str, str | int]]
 ) -> bool:
-    """同引用、同单个 at 且无正文时，改发空串彩蛋。"""
-    if repeat_message is None or uniform_reply_id is None:
+    """检查正文是否与上次成功发送内容相同。"""
+    last_signature = _last_trigger_signature(group_id)
+    if last_signature is None:
         return False
-
-    at_targets: list[str] = []
-    for segment in repeat_message:
-        if segment.type == "at":
-            at_targets.append(str(segment.data.get("qq", "")))
-            continue
-        if segment.type == "text" and not segment.data.get("text", "").strip():
-            continue
-        return False
-
-    return len(at_targets) == 1
+    return _strip_cite(last_signature) == body_signature
 
 
 def _not_from_bot(event: GroupMessageEvent) -> bool:
@@ -188,24 +301,23 @@ async def handle_repetition(bot: Bot, event: GroupMessageEvent):
     group_id = str(event.group_id)
     candidate = _group_candidate(group_id)
 
-    repeat_message, signature = _build_repeat_payload(event.message)
+    signature = _build_body_signature(event.message, event.self_id)
     reply_message_id = event.reply.message_id if event.reply else None
     _update_repeat_candidate(candidate, signature, reply_message_id)
 
     if not _should_repeat_now(candidate, signature):
         return
-    if signature == _last_trigger_signature(group_id):
+    assert signature is not None
+    if _same_body_as_last_trigger(group_id, signature):
         return
 
-    uniform_reply_id = candidate.get("last_uniform_reply_id")
-    if _should_send_empty_reply_easter_egg(repeat_message, uniform_reply_id):
-        outgoing = MessageSegment.reply(uniform_reply_id) + MessageSegment.text("")
-    else:
-        outgoing = repeat_message
-        if uniform_reply_id is not None:
-            outgoing = MessageSegment.reply(uniform_reply_id) + outgoing
+    prepublish_signature = _build_prepublish_signature(
+        signature, candidate.get("last_uniform_reply_id")
+    )
+    outgoing_signature = _finalize_outgoing_signature(prepublish_signature)
+    if outgoing_signature is None:
+        return
 
     setattr(event, "_yiyin_repetition_triggered", True)
-    await bot.send(event, outgoing)
-    assert signature is not None
-    _record_trigger_signature(group_id, signature)
+    await bot.send(event, _build_message_from_signature(outgoing_signature))
+    _record_trigger_signature(group_id, outgoing_signature)

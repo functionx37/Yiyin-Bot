@@ -114,12 +114,36 @@ def _build_repeat_payload(message: Message) -> tuple[Message | None, str | None]
             repeat_message.append(MessageSegment.face(face_id))
             parts.append(["face", face_id])
             continue
+        if segment.type == "at":
+            target = str(segment.data.get("qq", ""))
+            repeat_message.append(MessageSegment.at(target))
+            parts.append(["at", target])
+            continue
         return None, None
 
     if not parts:
         return None, None
     signature = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
     return repeat_message, signature
+
+
+def _should_send_empty_reply_easter_egg(
+    repeat_message: Message | None, uniform_reply_id: int | None
+) -> bool:
+    """同引用、同单个 at 且无正文时，改发空串彩蛋。"""
+    if repeat_message is None or uniform_reply_id is None:
+        return False
+
+    at_targets: list[str] = []
+    for segment in repeat_message:
+        if segment.type == "at":
+            at_targets.append(str(segment.data.get("qq", "")))
+            continue
+        if segment.type == "text" and not segment.data.get("text", "").strip():
+            continue
+        return False
+
+    return len(at_targets) == 1
 
 
 def _prune_recent_repeats(group_state: dict, now: float) -> None:
@@ -242,10 +266,13 @@ async def handle_repetition(bot: Bot, event: GroupMessageEvent):
     if _should_repeat(group_state, signature, now):
         _save_state()
         await asyncio.sleep(5)
-        outgoing = repeat_message
         uniform_reply_id = group_state.get("last_uniform_reply_id")
-        if uniform_reply_id is not None:
-            outgoing = MessageSegment.reply(uniform_reply_id) + outgoing
+        if _should_send_empty_reply_easter_egg(repeat_message, uniform_reply_id):
+            outgoing = MessageSegment.reply(uniform_reply_id) + MessageSegment.text("")
+        else:
+            outgoing = repeat_message
+            if uniform_reply_id is not None:
+                outgoing = MessageSegment.reply(uniform_reply_id) + outgoing
         await bot.send(event, outgoing)
         return
 

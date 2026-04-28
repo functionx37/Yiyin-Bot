@@ -603,6 +603,10 @@ async def handle_eat(
         elif len(reply_ids) > 1:
             # 吃大餐等多条食物消息，取第一条
             text = reply_ids[0]
+    # 兼容 `/吃什么` 被解析成 `/吃 什么` 的情况，直接走“吃什么”逻辑。
+    if text == "什么":
+        await _handle_what_to_eat(bot, event)
+        await eat_cmd.finish()
     if not text:
         await eat_cmd.finish(
             "用法：/吃 <食物ID/名字/标签>，或引用食物消息后直接发送 /吃"
@@ -716,9 +720,8 @@ async def handle_feast(
     await feast_cmd.finish(Message(parts))
 
 
-@what_to_eat_matcher.handle()
-async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
-    """检测『吃什么』：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]；单抽有概率触发隐藏食物"""
+async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
+    """处理“吃什么”入口：普通消息与 `/吃什么` 命令兼容共用。"""
     group_id = str(event.group_id)
     index = _load_index(group_id)
     if not index:
@@ -767,7 +770,6 @@ async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
                 logger.warning(f"撤回隐藏食物图片失败: {e}")
 
         asyncio.create_task(_recall_image())
-        await what_to_eat_matcher.finish()
         return
 
     # 普通抽取：从普通食物中选（若无普通食物则从全部中选）
@@ -783,7 +785,14 @@ async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
 
     await bot.send(event, "是啊，吃什么")
     msg = MessageSegment.text("请你吃") + MessageSegment.text(label) + MessageSegment.text("怎么样？\n") + MessageSegment.image(filepath.read_bytes())
-    await what_to_eat_matcher.finish(msg)
+    await bot.send(event, msg)
+
+
+@what_to_eat_matcher.handle()
+async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
+    """检测『吃什么』：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]；单抽有概率触发隐藏食物"""
+    await _handle_what_to_eat(bot, event)
+    await what_to_eat_matcher.finish()
 
 
 from yiyin.food import auto_collect  # noqa: F401

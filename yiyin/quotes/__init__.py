@@ -28,14 +28,18 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, Message
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
-from yiyin.utils import image_segment_from_path
-
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "quotes"
 
 
 # ==================== 工具函数 ====================
+def _image_segment_from_path(filepath: Path) -> MessageSegment:
+    if not filepath.exists():
+        raise FileNotFoundError(f"图片不存在: {filepath}")
+    return MessageSegment.image(filepath)
+
+
 def _get_group_dir(group_id: str) -> Path:
     """获取群组数据目录"""
     return DATA_DIR / group_id
@@ -856,7 +860,7 @@ async def handle_view(
         if not filepath.exists():
             continue
         try:
-            img_seg = image_segment_from_path(filepath)
+            img_seg = _image_segment_from_path(filepath)
         except Exception:
             logger.exception(f"读取语录图片失败: {filepath}")
             continue

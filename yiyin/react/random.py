@@ -111,8 +111,32 @@ async def _random_enabled(event: GroupMessageEvent) -> bool:
     return is_feature_enabled(_FEATURE_KEY, str(event.group_id))
 
 
+async def _should_handle_random(event: GroupMessageEvent) -> bool:
+    """仅在真正需要触发乱序复读时才进入 matcher。"""
+    if not _not_from_bot(event):
+        return False
+    if not await _random_enabled(event):
+        return False
+    if getattr(event, "_yiyin_repetition_triggered", False):
+        return False
+
+    shuffled_reply = _build_shuffled_reply(event.get_plaintext())
+    if shuffled_reply is None:
+        return False
+
+    state = _load_state()
+    group_state = _group_state(state, str(event.group_id))
+    should_trigger = _should_trigger_shuffle(group_state)
+    _save_state(state)
+    if not should_trigger:
+        return False
+
+    setattr(event, "_yiyin_random_reply", shuffled_reply)
+    return True
+
+
 random_matcher = on_message(
-    Rule(_not_from_bot, _random_enabled),
+    Rule(_should_handle_random),
     priority=61,
     block=False,
 )
@@ -121,18 +145,7 @@ random_matcher = on_message(
 @random_matcher.handle()
 async def handle_random_repetition(bot: Bot, event: GroupMessageEvent):
     """处理乱序复读。"""
-    if getattr(event, "_yiyin_repetition_triggered", False):
-        return
-
-    shuffled_reply = _build_shuffled_reply(event.get_plaintext())
+    shuffled_reply = getattr(event, "_yiyin_random_reply", None)
     if shuffled_reply is None:
         return
-
-    state = _load_state()
-    group_state = _group_state(state, str(event.group_id))
-    if not _should_trigger_shuffle(group_state):
-        _save_state(state)
-        return
-
-    _save_state(state)
     await bot.send(event, shuffled_reply)

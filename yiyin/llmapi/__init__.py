@@ -36,7 +36,7 @@ def _get_api_key() -> str:
                     _DOTENV_LOADED = True
                     key = os.environ.get("YUNWU_API_KEY", "")
                     if key:
-                        logger.info("llmapi: 已从 %s 加载 YUNWU_API_KEY", f)
+                        logger.info("llmapi: 已从 {} 加载 YUNWU_API_KEY", f)
                     break
         except ImportError:
             pass
@@ -64,6 +64,45 @@ def _extract_text_from_content(content: Any) -> str | None:
     return None
 
 
+def _build_data_url(image_bytes: bytes, content_type: str | None) -> str:
+    """将图片二进制转为 data URL，统一以内联方式发给模型。"""
+    mime = (content_type or "").split(";", 1)[0].strip().lower()
+    if not mime.startswith("image/"):
+        mime = "image/png"
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime};base64,{b64}"
+
+
+def _build_http_timeout(timeout: float) -> httpx.Timeout:
+    """为上传图片场景提供更宽松的 write 超时，避免大图 base64 上传超时。"""
+    base = max(float(timeout), 1.0)
+    return httpx.Timeout(
+        connect=min(base, 10.0),
+        read=base,
+        write=max(base, 120.0),
+        pool=min(base, 10.0),
+    )
+
+
+async def _download_image_as_data_url(
+    image_url: str,
+    *,
+    timeout: float = 30,
+) -> str | None:
+    """下载图片后转为 data URL，避免把外链直接交给模型。"""
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=_build_http_timeout(timeout),
+        ) as client:
+            resp = await client.get(image_url)
+        resp.raise_for_status()
+        return _build_data_url(resp.content, resp.headers.get("content-type"))
+    except (httpx.TimeoutException, httpx.HTTPError) as e:
+        logger.warning("下载图片并转 data URL 失败: {}: {}", type(e).__name__, e)
+        return None
+
+
 async def chat_completion(
     messages: list[dict[str, Any]],
     *,
@@ -77,7 +116,7 @@ async def chat_completion(
     """调用 OpenAI 兼容的 Chat Completions 接口，返回助手回复文本。
 
     支持纯文本与识图（Vision）多模态输入。识图时，messages 中 content 可为数组：
-    [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"https://..."}}]
+    [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}]
 
     云雾 API 文档：https://yunwu.apifox.cn/
 
@@ -113,7 +152,7 @@ async def chat_completion(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=_build_http_timeout(timeout)) as client:
             resp = await client.post(
                 f"{_get_base_url()}/chat/completions",
                 json=payload,
@@ -164,7 +203,7 @@ async def describe_image(
 
     Args:
         prompt: 对图片的提问或指令（如『简短描述这张图』）
-        image_url: 图片 URL，需公网可访问（支持 jpeg/png/gif/webp）
+        image_url: 图片 URL，会先下载后转成 data URL 再发给模型
         model: Vision 模型，默认 gpt-4o-mini
         max_tokens: 最大生成 token 数
         timeout: 请求超时（秒）
@@ -172,12 +211,16 @@ async def describe_image(
     Returns:
         模型对图片的理解/描述文本，失败时返回 None
     """
+    data_url = await _download_image_as_data_url(image_url, timeout=timeout)
+    if not data_url:
+        return None
+
     messages: list[dict[str, Any]] = [
         {
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "image_url", "image_url": {"url": data_url}},
             ],
         }
     ]

@@ -271,8 +271,38 @@ async def _repetition_enabled(event: GroupMessageEvent) -> bool:
     return is_feature_enabled(_FEATURE_KEY, str(event.group_id))
 
 
+async def _should_handle_repetition(event: GroupMessageEvent) -> bool:
+    """仅在真正需要触发复读时才进入 matcher。"""
+    if not _not_from_bot(event):
+        return False
+    if not await _repetition_enabled(event):
+        return False
+
+    group_id = str(event.group_id)
+    candidate = _group_candidate(group_id)
+    signature = _build_body_signature(event.message, event.self_id)
+    reply_message_id = event.reply.message_id if event.reply else None
+    _update_repeat_candidate(candidate, signature, reply_message_id)
+
+    if not _should_repeat_now(candidate, signature):
+        return False
+    assert signature is not None
+    if _same_body_as_last_trigger(group_id, signature):
+        return False
+
+    prepublish_signature = _build_prepublish_signature(
+        signature, candidate.get("last_uniform_reply_id")
+    )
+    outgoing_signature = _finalize_outgoing_signature(prepublish_signature)
+    if outgoing_signature is None:
+        return False
+
+    setattr(event, "_yiyin_repetition_outgoing_signature", outgoing_signature)
+    return True
+
+
 repetition_matcher = on_message(
-    Rule(_not_from_bot, _repetition_enabled),
+    Rule(_should_handle_repetition),
     priority=60,
     block=False,
 )
@@ -282,25 +312,9 @@ repetition_matcher = on_message(
 async def handle_repetition(bot: Bot, event: GroupMessageEvent):
     """处理连续相同消息的复读。"""
     group_id = str(event.group_id)
-    candidate = _group_candidate(group_id)
-
-    signature = _build_body_signature(event.message, event.self_id)
-    reply_message_id = event.reply.message_id if event.reply else None
-    _update_repeat_candidate(candidate, signature, reply_message_id)
-
-    if not _should_repeat_now(candidate, signature):
-        return
-    assert signature is not None
-    if _same_body_as_last_trigger(group_id, signature):
-        return
-
-    prepublish_signature = _build_prepublish_signature(
-        signature, candidate.get("last_uniform_reply_id")
-    )
-    outgoing_signature = _finalize_outgoing_signature(prepublish_signature)
+    outgoing_signature = getattr(event, "_yiyin_repetition_outgoing_signature", None)
     if outgoing_signature is None:
         return
-
     setattr(event, "_yiyin_repetition_triggered", True)
     await bot.send(event, _build_message_from_signature(outgoing_signature))
     _record_trigger_signature(group_id, outgoing_signature)

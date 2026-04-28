@@ -17,6 +17,20 @@ except ImportError:
 
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
+from nonebot.log import default_filter, default_format, logger
+
+LOG_DIR = Path(__file__).resolve().parent / "data" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+logger.add(
+    LOG_DIR / "nonebot_{time:YYYY-MM-DD}.log",
+    level="INFO",
+    rotation="00:00",
+    retention="30 days",
+    encoding="utf-8",
+    format=default_format,
+    filter=default_filter,
+)
 
 nonebot.init()
 

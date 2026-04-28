@@ -27,6 +27,8 @@ from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 
+from yiyin.food.llm_recognition import recognize_food_from_image_bytes
+
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "food"
@@ -360,13 +362,13 @@ async def _do_collect_food(
     images = await _extract_images(bot, event, args)
     if not images:
         await matcher.finish(
-            "请在命令中附带图片或引用含图片的消息，例如：/收集食物 蛋炒饭 [图片]"
+            "请在命令中附带图片或引用含图片的消息，例如：/收集食物 [名字] [图片]"
         )
 
     group_id = str(event.group_id)
     index = _load_index(group_id)
     existing_ids = set(index.keys())
-    downloaded: list[tuple[str, bytes]] = []  # (short_id, content)
+    downloaded: list[tuple[str, bytes, str | None]] = []  # (short_id, content, content_type)
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
         for img_seg in images:
@@ -378,7 +380,7 @@ async def _do_collect_food(
                 resp.raise_for_status()
                 short_id = _generate_short_id(existing_ids)
                 existing_ids.add(short_id)
-                downloaded.append((short_id, resp.content))
+                downloaded.append((short_id, resp.content, resp.headers.get("content-type")))
             except Exception:
                 logger.exception(f"下载食物图片失败: {url}")
                 await matcher.finish(
@@ -388,24 +390,55 @@ async def _do_collect_food(
     if not downloaded:
         await matcher.finish("未获取到有效图片，请检查后重试")
 
+    resolved_names: dict[str, str | None] = {}
+    if name:
+        for short_id, _, _ in downloaded:
+            resolved_names[short_id] = name
+    else:
+        name_results = await asyncio.gather(
+            *[
+                recognize_food_from_image_bytes(
+                    content,
+                    content_type,
+                    log_prefix="手动收集食物自动命名",
+                )
+                for _, content, content_type in downloaded
+            ]
+        )
+        for (short_id, _, _), (rec_type, auto_name) in zip(downloaded, name_results):
+            resolved_names[short_id] = auto_name if rec_type == "FOOD" else None
+
     images_dir = _get_images_dir(group_id)
     images_dir.mkdir(parents=True, exist_ok=True)
     try:
-        for short_id, content in downloaded:
-            index[short_id] = {"name": name}
+        for short_id, content, _ in downloaded:
+            index[short_id] = {"name": resolved_names.get(short_id)}
             filepath = images_dir / f"{short_id}.png"
             filepath.write_bytes(content)
         _save_index(group_id, index)
     except Exception:
         logger.exception("保存食物文件失败，回滚")
-        for short_id, _ in downloaded:
+        for short_id, _, _ in downloaded:
             (images_dir / f"{short_id}.png").unlink(missing_ok=True)
         await matcher.finish("保存失败，已回滚（未修改数据），请稍后重试")
 
-    id_str = "、".join(sid for sid, _ in downloaded)
-    name_hint = f"『{name}』" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
+    id_str = "、".join(sid for sid, _, _ in downloaded)
+    if name:
+        await matcher.finish(
+            f"已保存 {len(downloaded)} 张食物图✓ 『{name}』\n食物ID：{id_str}"
+        )
+
+    auto_named_count = sum(1 for n in resolved_names.values() if n)
+    labels_text = "\n".join(
+        _format_food_label(short_id, resolved_names.get(short_id))
+        for short_id, _, _ in downloaded
+    )
+    if auto_named_count:
+        name_hint = f"（已自动命名 {auto_named_count} 张，名称仅供参考，可用 /补充名字 <id> <名字> 调整）"
+    else:
+        name_hint = "（未指定名字，且自动命名失败，可用 /补充名字 <id> <名字> 补充）"
     await matcher.finish(
-        f"已保存 {len(downloaded)} 张食物图✓ {name_hint}\n食物ID：{id_str}"
+        f"已保存 {len(downloaded)} 张食物图✓ {name_hint}\n{labels_text}\n食物ID：{id_str}"
     )
 
 

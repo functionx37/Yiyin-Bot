@@ -9,7 +9,7 @@ import base64
 
 from nonebot.log import logger
 
-from yiyin.llmapi import chat_completion
+from yiyin.llmapi import ChatCompletionTransportError, chat_completion
 
 IMAGE_RECOG_MODEL = "gpt-4o"
 
@@ -81,20 +81,31 @@ async def recognize_food_from_image_bytes(
                 model=IMAGE_RECOG_MODEL,
                 temperature=0.1,
                 max_tokens=64,
-                timeout=45,
+                timeout=90,
+                raise_on_error=True,
             )
             if reply:
                 break
             logger.warning(
-                "{} LLM 返回空内容{}",
+                "{} LLM 成功返回但内容为空{}",
                 log_prefix,
                 f" (第{attempt + 1}次)" if attempt == 0 else "（重试后）",
             )
             if attempt == 1:
                 return "OTHER", None
+        except ChatCompletionTransportError as e:
+            logger.warning(
+                "{} LLM 请求失败{}: {}",
+                log_prefix,
+                f" (第{attempt + 1}次)" if attempt == 0 else "（重试后）",
+                e,
+            )
+            if attempt == 1:
+                logger.exception("{} LLM 重试后仍失败", log_prefix)
+                return "OTHER", None
         except Exception as e:
             logger.warning(
-                "{} LLM 调用失败{}: {}",
+                "{} LLM 处理异常{}: {}",
                 log_prefix,
                 f" (第{attempt + 1}次)" if attempt == 0 else "（重试后）",
                 e,

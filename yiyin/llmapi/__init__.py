@@ -22,6 +22,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DOTENV_LOADED = False
 
 
+class ChatCompletionError(RuntimeError):
+    """Chat completion 调用失败。"""
+
+
+class ChatCompletionTransportError(ChatCompletionError):
+    """Chat completion 在网络传输阶段失败。"""
+
+
 def _get_api_key() -> str:
     """获取 YUNWU_API_KEY，若为空则尝试加载 .env.prod 后重试（解决 nb run 子进程可能未读到的情况）"""
     global _DOTENV_LOADED
@@ -77,10 +85,10 @@ def _build_http_timeout(timeout: float) -> httpx.Timeout:
     """为上传图片场景提供更宽松的 write 超时，避免大图 base64 上传超时。"""
     base = max(float(timeout), 1.0)
     return httpx.Timeout(
-        connect=min(base, 10.0),
+        connect=min(base, 15.0),
         read=base,
-        write=max(base, 120.0),
-        pool=min(base, 10.0),
+        write=max(base * 2, 180.0),
+        pool=min(base, 15.0),
     )
 
 
@@ -103,6 +111,94 @@ async def _download_image_as_data_url(
         return None
 
 
+def _summarize_messages(messages: list[dict[str, Any]]) -> dict[str, int]:
+    """汇总消息体，便于失败时快速判断是否包含图片及大致规模。"""
+    summary = {
+        "messages": len(messages),
+        "text_chars": 0,
+        "inline_images": 0,
+        "remote_images": 0,
+    }
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            summary["text_chars"] += len(content)
+            continue
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                text = part.get("text")
+                if isinstance(text, str):
+                    summary["text_chars"] += len(text)
+            elif part.get("type") == "image_url":
+                image_url = part.get("image_url")
+                url = image_url.get("url") if isinstance(image_url, dict) else image_url
+                if isinstance(url, str) and url.startswith("data:"):
+                    summary["inline_images"] += 1
+                elif url:
+                    summary["remote_images"] += 1
+    return summary
+
+
+async def _inline_image_urls(
+    messages: list[dict[str, Any]],
+    *,
+    timeout: float,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """将外链图片统一转为 data URL，尽量避免模型侧再次拉图。"""
+    converted = 0
+    failed = 0
+    prepared_messages: list[dict[str, Any]] = []
+
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            prepared_messages.append(msg)
+            continue
+
+        changed = False
+        new_content: list[Any] = []
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") != "image_url":
+                new_content.append(part)
+                continue
+
+            image_url = part.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else image_url
+            if not isinstance(url, str) or not url or url.startswith("data:"):
+                new_content.append(part)
+                continue
+
+            data_url = await _download_image_as_data_url(url, timeout=timeout)
+            if not data_url:
+                failed += 1
+                new_content.append(part)
+                continue
+
+            converted += 1
+            changed = True
+            new_part = dict(part)
+            if isinstance(image_url, dict):
+                new_image_url = dict(image_url)
+                new_image_url["url"] = data_url
+                new_part["image_url"] = new_image_url
+            else:
+                new_part["image_url"] = {"url": data_url}
+            new_content.append(new_part)
+
+        if changed:
+            new_msg = dict(msg)
+            new_msg["content"] = new_content
+            prepared_messages.append(new_msg)
+        else:
+            prepared_messages.append(msg)
+
+    return prepared_messages, converted, failed
+
+
 async def chat_completion(
     messages: list[dict[str, Any]],
     *,
@@ -111,6 +207,7 @@ async def chat_completion(
     max_tokens: int = 256,
     top_p: float = 0.9,
     timeout: float = 30,
+    raise_on_error: bool = False,
     **kwargs: Any,
 ) -> str | None:
     """调用 OpenAI 兼容的 Chat Completions 接口，返回助手回复文本。
@@ -136,9 +233,24 @@ async def chat_completion(
         logger.warning("YUNWU_API_KEY 未配置，跳过 LLM 请求。请在 .env.prod 中设置 YUNWU_API_KEY")
         return None
 
+    prepared_messages, converted_images, failed_image_inline = await _inline_image_urls(
+        messages,
+        timeout=timeout,
+    )
+    summary = _summarize_messages(prepared_messages)
+
+    if failed_image_inline:
+        logger.warning(
+            "chat_completion 有图片未能转为 data URL，将回退为外链传图: model={} timeout={} summary={} failed_images={}",
+            model,
+            timeout,
+            summary,
+            failed_image_inline,
+        )
+
     payload: dict[str, Any] = {
         "model": model,
-        "messages": messages,
+        "messages": prepared_messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "top_p": top_p,
@@ -160,13 +272,28 @@ async def chat_completion(
             )
 
         if resp.status_code != 200:
-            logger.warning("chat_completion 非 200: status={} body={}", resp.status_code, resp.text[:200])
+            logger.warning(
+                "chat_completion 非 200: status={} model={} timeout={} summary={} converted_images={} body={}",
+                resp.status_code,
+                model,
+                timeout,
+                summary,
+                converted_images,
+                resp.text[:200],
+            )
             return None
 
         data = resp.json()
         choices = data.get("choices", [])
         if not choices:
-            logger.warning("chat_completion choices 为空: {}", {k: v for k, v in data.items() if k != "usage"})
+            logger.warning(
+                "chat_completion choices 为空: model={} timeout={} summary={} converted_images={} body={}",
+                model,
+                timeout,
+                summary,
+                converted_images,
+                {k: v for k, v in data.items() if k != "usage"},
+            )
             return None
 
         first = choices[0]
@@ -177,7 +304,11 @@ async def chat_completion(
         )
         if result is None:
             logger.warning(
-                "chat_completion 成功但 content 为空: finish_reason={}, content_type={}, content={}",
+                "chat_completion 成功但 content 为空: model={} timeout={} summary={} converted_images={} finish_reason={} content_type={} content={}",
+                model,
+                timeout,
+                summary,
+                converted_images,
                 first.get("finish_reason"),
                 type(content).__name__,
                 repr(content)[:100] if content is not None else None,
@@ -185,7 +316,17 @@ async def chat_completion(
         return result
 
     except (httpx.TimeoutException, httpx.HTTPError, KeyError) as e:
-        logger.warning("chat_completion 异常: {}: {}", type(e).__name__, e)
+        logger.warning(
+            "chat_completion 异常: {}: {} | model={} timeout={} summary={} converted_images={}",
+            type(e).__name__,
+            e,
+            model,
+            timeout,
+            summary,
+            converted_images,
+        )
+        if raise_on_error:
+            raise ChatCompletionTransportError(f"{type(e).__name__}: {e}") from e
         return None
 
 

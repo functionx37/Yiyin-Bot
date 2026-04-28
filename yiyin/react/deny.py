@@ -8,10 +8,10 @@
 import random
 
 from nonebot import on_message
-from nonebot.adapters.onebot.v11 import GroupMessageEvent
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.rule import Rule
 
-from yiyin.toggle import is_feature_enabled
+from yiyin.toggle import is_feature_enabled_async
 
 _FEATURE_KEY = "yiyin.react.deny"
 _REPLY_PROBABILITY = 0.5
@@ -35,9 +35,9 @@ def _not_from_bot(event: GroupMessageEvent) -> bool:
     return str(event.self_id) != str(event.user_id)
 
 
-async def _deny_enabled(event: GroupMessageEvent) -> bool:
+async def _deny_enabled(bot: Bot, event: GroupMessageEvent) -> bool:
     """仅在当前群启用了否定功能时触发。"""
-    return is_feature_enabled(_FEATURE_KEY, str(event.group_id))
+    return await is_feature_enabled_async(bot, _FEATURE_KEY, str(event.group_id))
 
 
 def _deny_trigger(event: GroupMessageEvent) -> bool:

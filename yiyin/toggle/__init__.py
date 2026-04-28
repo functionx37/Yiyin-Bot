@@ -1,25 +1,19 @@
 """
 NoneBot2 功能开关管理插件
-- 命令：/功能列表        — 查看当前群所有功能的启用/禁用状态
-- 命令：/启用 <功能名>   — 在当前群启用指定功能（仅管理员/群主）
-- 命令：/禁用 <功能名>   — 在当前群禁用指定功能（仅管理员/群主）
-- 原理：通过 run_preprocessor 全局拦截，对已禁用的插件直接忽略
-- 支持两种功能类型：
-  - 默认开（plugins）：默认启用，可禁用
-  - 隐藏（hidden）：默认关闭，需手动启用，不在功能列表和提示中展示
+- 命令：/启用 <功能名>   — 在当前群启用指定功能（仅超级管理员）
+- 命令：/禁用 <功能名>   — 在当前群禁用指定功能（仅超级管理员）
+- 原理：通过 run_preprocessor 全局拦截，每次从磁盘读取群开关文件
 """
+
+from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from nonebot import on_command
 from nonebot.adapters import Event
-from nonebot.adapters.onebot.v11 import (
-    Bot,
-    GroupMessageEvent,
-    Message,
-)
-from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
 from nonebot.exception import IgnoredException
 from nonebot.matcher import Matcher
 from nonebot.message import run_preprocessor
@@ -28,301 +22,362 @@ from nonebot.permission import SUPERUSER
 
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-CONFIG_PATH = PROJECT_ROOT / "data" / "toggle" / "config.json"
-FEATURES_PATH = PROJECT_ROOT / "config" / "features.json"
+TOGGLE_TABLE_PATH = PROJECT_ROOT / "config" / "toggle_table.json"
+TOGGLE_DEFAULT_PATH = PROJECT_ROOT / "config" / "toggle_default.json"
+GROUP_TOGGLE_DIR = PROJECT_ROOT / "data" / "toggle"
 
-# ==================== 从外部配置加载功能注册表 ====================
-# config/features.json 中：
-#   "plugins"       — 默认启用可禁用的插件
-#   "plugin_groups" — 插件组：一个显示名对应多个子插件（如 随机表情 = 对称+强强+随机表情+Emoji合成）
-#   "hidden"        — 默认关闭需手动启用，且不在功能列表和提示中展示
-# 新增插件时，编辑 config/features.json 即可纳入开关管理
-with open(FEATURES_PATH, "r", encoding="utf-8") as _f:
-    _features = json.load(_f)
-
-PLUGIN_REGISTRY: dict[str, str] = _features.get("plugins", {})
-PLUGIN_GROUPS: dict[str, list[str]] = _features.get("plugin_groups", {})
-HIDDEN_REGISTRY: dict[str, str] = _features.get("hidden", {})
-
-# 子插件 -> 所属组：用于将对称/强强/随机表情/Emoji合成 等映射到「随机表情」组
-_MEMBER_TO_GROUP: dict[str, str] = {}
-for group_key, members in PLUGIN_GROUPS.items():
-    for m in members:
-        _MEMBER_TO_GROUP[m] = group_key
-
-# 反向映射：中文功能名 -> 模块名 / 功能标识（用于命令参数解析）
-_DISPLAY_TO_MODULE: dict[str, str] = {v: k for k, v in PLUGIN_REGISTRY.items()}
-_DISPLAY_TO_HIDDEN: dict[str, str] = {v: k for k, v in HIDDEN_REGISTRY.items()}
-
-# 可见功能名列表（用于错误提示和功能列表，不含隐藏功能）
-_VISIBLE_DISPLAY_NAMES: list[str] = list(PLUGIN_REGISTRY.values())
-
-# 本插件名称，不可被禁用
-_SELF_PLUGIN = "toggle"
-
-# ==================== 内存缓存 ====================
-_config_cache: dict | None = None
+_SELF_PLUGIN_PREFIXES = ("toggle", "yiyin.toggle")
 
 
-def _load_config() -> dict:
-    """加载配置（优先使用内存缓存，首次从文件读取）"""
-    global _config_cache
-    if _config_cache is not None:
-        return _config_cache
+def _read_json_file(path: Path, default: Any) -> Any:
+    """读取 JSON；文件不存在或格式错误时返回默认值。"""
+    if not path.exists():
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return default
 
-    if not CONFIG_PATH.exists():
-        _config_cache = {"disabled": {}}
+
+def _write_json_file(path: Path, data: dict[str, Any]) -> None:
+    """写入 JSON。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _load_toggle_table() -> tuple[dict[str, str], dict[str, list[str]]]:
+    """加载功能注册表和功能组。"""
+    raw = _read_json_file(TOGGLE_TABLE_PATH, {})
+    if not isinstance(raw, dict):
+        return {}, {}
+
+    base_plugin_raw = raw.get("base_plugin", {})
+    plugin_groups_raw = raw.get("plugin_groups", {})
+
+    base_plugin: dict[str, str] = {}
+    if isinstance(base_plugin_raw, dict):
+        for key, display_name in base_plugin_raw.items():
+            if isinstance(key, str) and isinstance(display_name, str):
+                base_plugin[key] = display_name
+
+    known_display_names = set(base_plugin.values())
+    plugin_groups: dict[str, list[str]] = {}
+    if isinstance(plugin_groups_raw, dict):
+        for group_name, members in plugin_groups_raw.items():
+            if not isinstance(group_name, str) or not isinstance(members, list):
+                continue
+            valid_members = [
+                member
+                for member in members
+                if isinstance(member, str) and member in known_display_names
+            ]
+            if valid_members:
+                plugin_groups[group_name] = valid_members
+
+    return base_plugin, plugin_groups
+
+
+def _load_default_toggles(
+    base_plugin: dict[str, str] | None = None,
+) -> dict[str, bool]:
+    """加载默认开关状态，仅保留已注册功能。"""
+    if base_plugin is None:
+        base_plugin, _ = _load_toggle_table()
+
+    raw = _read_json_file(TOGGLE_DEFAULT_PATH, {})
+    if not isinstance(raw, dict):
+        raw = {}
+
+    defaults: dict[str, bool] = {}
+    for display_name in base_plugin.values():
+        value = raw.get(display_name)
+        defaults[display_name] = value if isinstance(value, bool) else False
+    return defaults
+
+
+def _display_to_key_map(base_plugin: dict[str, str] | None = None) -> dict[str, str]:
+    """显示名到功能键的反向映射。"""
+    if base_plugin is None:
+        base_plugin, _ = _load_toggle_table()
+    return {display_name: key for key, display_name in base_plugin.items()}
+
+
+def _group_toggle_path(group_id: str) -> Path:
+    return GROUP_TOGGLE_DIR / f"{group_id}.json"
+
+
+def _normalize_group_toggle(
+    raw_data: Any,
+    defaults: dict[str, bool],
+    created_group_name: str = "",
+) -> tuple[dict[str, Any], bool]:
+    """规范化单群开关数据，并返回是否需要回写。"""
+    need_write = False
+    raw_dict = raw_data if isinstance(raw_data, dict) else {}
+    if not isinstance(raw_data, dict):
+        need_write = True
+
+    group_name = raw_dict.get("group_name")
+    if isinstance(group_name, str):
+        normalized_group_name = group_name
     else:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            _config_cache = json.load(f)
+        normalized_group_name = created_group_name
+        if "group_name" in raw_dict or created_group_name:
+            need_write = True
 
-    return _config_cache
+    toggle_raw = raw_dict.get("toggle")
+    if not isinstance(toggle_raw, dict):
+        toggle_raw = {}
+        need_write = True
+
+    normalized_toggle: dict[str, bool] = {}
+    for display_name, default_value in defaults.items():
+        value = toggle_raw.get(display_name)
+        if isinstance(value, bool):
+            normalized_toggle[display_name] = value
+        else:
+            normalized_toggle[display_name] = default_value
+            need_write = True
+
+    if set(toggle_raw.keys()) != set(defaults.keys()):
+        need_write = True
+
+    return {
+        "group_name": normalized_group_name,
+        "toggle": normalized_toggle,
+    }, need_write
 
 
-def _save_config(config: dict) -> None:
-    """保存配置到文件并更新内存缓存"""
-    global _config_cache
-    _config_cache = config
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+async def _fetch_group_name(bot: Bot, group_id: str) -> str:
+    """获取群名，失败时返回空字符串。"""
+    try:
+        info = await bot.get_group_info(group_id=int(group_id), no_cache=True)
+    except Exception:
+        return ""
+    group_name = info.get("group_name", "")
+    return group_name if isinstance(group_name, str) else ""
 
 
-def _is_disabled(plugin_key: str, group_id: str) -> bool:
-    """检查指定插件（或插件组）是否在指定群被禁用"""
-    config = _load_config()
-    disabled_list = config.get("disabled", {}).get(group_id, [])
-    if plugin_key in disabled_list:
-        return True
-    # 若为插件组，检查其成员是否被禁用（兼容旧配置）
-    if plugin_key in PLUGIN_GROUPS:
-        for member in PLUGIN_GROUPS[plugin_key]:
-            if member in disabled_list:
-                return True
-    return False
+def _ensure_group_toggle_sync(group_id: str) -> dict[str, Any]:
+    """同步读取并修复单群开关文件。缺文件时仅返回默认值，不落盘。"""
+    base_plugin, _ = _load_toggle_table()
+    defaults = _load_default_toggles(base_plugin)
+    path = _group_toggle_path(group_id)
+
+    if not path.exists():
+        normalized, _ = _normalize_group_toggle({}, defaults, "")
+        return normalized
+
+    raw_data = _read_json_file(path, {})
+    normalized, need_write = _normalize_group_toggle(raw_data, defaults)
+
+    if need_write:
+        _write_json_file(path, normalized)
+    return normalized
+
+
+async def _ensure_group_toggle_async(bot: Bot, group_id: str) -> dict[str, Any]:
+    """异步读取并修复单群开关文件。缺文件时尝试补上群名。"""
+    base_plugin, _ = _load_toggle_table()
+    defaults = _load_default_toggles(base_plugin)
+    path = _group_toggle_path(group_id)
+
+    if path.exists():
+        raw_data = _read_json_file(path, {})
+        normalized, need_write = _normalize_group_toggle(raw_data, defaults)
+    else:
+        group_name = await _fetch_group_name(bot, group_id)
+        normalized, need_write = _normalize_group_toggle({}, defaults, group_name)
+        need_write = True
+
+    if need_write:
+        _write_json_file(path, normalized)
+    return normalized
+
+
+def _resolve_display_name(feature_key: str) -> str | None:
+    """将功能键解析为显示名。未注册功能返回 None。"""
+    base_plugin, _ = _load_toggle_table()
+    return base_plugin.get(feature_key)
 
 
 def is_feature_enabled(feature_key: str, group_id: str) -> bool:
-    """检查指定隐藏功能是否在指定群已启用（默认关闭）
+    """检查指定功能在指定群是否已启用。"""
+    display_name = _resolve_display_name(feature_key)
+    if display_name is None:
+        return True
 
-    供其他插件调用，例如：
-        from yiyin.toggle import is_feature_enabled
-        if is_feature_enabled("some_feature", group_id): ...
-    """
-    config = _load_config()
-    enabled_list = config.get("enabled", {}).get(group_id, [])
-    return feature_key in enabled_list
+    group_data = _ensure_group_toggle_sync(group_id)
+    toggles = group_data.get("toggle", {})
+    if not isinstance(toggles, dict):
+        return False
+    value = toggles.get(display_name)
+    return value if isinstance(value, bool) else False
+
+
+async def is_feature_enabled_async(bot: Bot, feature_key: str, group_id: str) -> bool:
+    """异步检查指定功能在指定群是否已启用。"""
+    display_name = _resolve_display_name(feature_key)
+    if display_name is None:
+        return True
+
+    group_data = await _ensure_group_toggle_async(bot, group_id)
+    toggles = group_data.get("toggle", {})
+    if not isinstance(toggles, dict):
+        return False
+    value = toggles.get(display_name)
+    return value if isinstance(value, bool) else False
 
 
 def is_plugin_enabled(plugin_key: str, group_id: str) -> bool:
-    """检查指定插件级功能是否在指定群已启用（默认启用，被禁用则返回 False）
-
-    供其他插件调用，例如检查某插件是否在某群已启用：
-        from yiyin.toggle import is_plugin_enabled
-        if is_plugin_enabled("tarot", group_id): ...
-    """
-    if plugin_key not in PLUGIN_REGISTRY:
-        return True  # 未注册的插件默认启用
-    return not _is_disabled(plugin_key, group_id)
+    """兼容旧调用名，行为等同于 is_feature_enabled。"""
+    return is_feature_enabled(plugin_key, group_id)
 
 
-def _get_plugin_key(matcher: Matcher) -> str | None:
-    """从 Matcher 提取插件模块名（兼容内置插件与外部插件）
+def _match_registered_key(candidate: str, base_plugin: dict[str, str]) -> str | None:
+    """按精确匹配和最长前缀匹配注册表中的功能键。"""
+    if candidate in base_plugin:
+        return candidate
 
-    匹配优先级：
-    1. 外部插件名若在 plugin_groups 中，直接返回组键（如 nonebot_plugin_memes → random_emotion）
-    2. 对于 yiyin.meme，从 handler 的 __module__ 区分对称/强强，再映射到组
-    3. 全名直接匹配
-    4. 子插件前缀匹配
-    5. 取最后一段匹配
-    """
+    for key in sorted(base_plugin.keys(), key=len, reverse=True):
+        if candidate.startswith(f"{key}.") or candidate.startswith(f"{key}:"):
+            return key
+    return None
+
+
+def _resolve_feature_key(matcher: Matcher) -> str | None:
+    """从 Matcher 推断当前触发的基础功能键。"""
     plugin = matcher.plugin
     if plugin is None:
         return None
-    name = plugin.name
 
-    # 外部插件若属于某组，直接返回组键
-    if name in _MEMBER_TO_GROUP:
-        return _MEMBER_TO_GROUP[name]
+    plugin_name = plugin.name
+    if any(
+        plugin_name == prefix or plugin_name.startswith(f"{prefix}.")
+        for prefix in _SELF_PLUGIN_PREFIXES
+    ):
+        return None
 
-    # 对于 yiyin.meme 的子功能，从 handler 的 __module__ 区分对称/强强
-    if name == "yiyin.meme" and matcher.handlers:
-        handler = matcher.handlers[0]
-        if hasattr(handler, "__module__"):
-            mod = handler.__module__ or ""
-            if "symmetric" in mod:
-                return _MEMBER_TO_GROUP.get("yiyin.meme.symmetric", "yiyin.meme.symmetric")
-            if "ziming" in mod:
-                return _MEMBER_TO_GROUP.get("yiyin.meme.ziming", "yiyin.meme.ziming")
+    base_plugin, _ = _load_toggle_table()
+    if not base_plugin:
+        return None
 
-    _all_keys = PLUGIN_REGISTRY | HIDDEN_REGISTRY
-    if name in _all_keys:
-        return name
-    for key in _all_keys:
-        if name.startswith(key + ".") or name.startswith(key + ":"):
-            return key
+    for handler in matcher.handlers:
+        module_name = getattr(handler, "__module__", None)
+        if isinstance(module_name, str):
+            matched = _match_registered_key(module_name, base_plugin)
+            if matched is not None:
+                return matched
 
-    for sep in (".", ":"):
-        if sep in name:
-            name = name.rsplit(sep, 1)[-1]
-    return name
+    return _match_registered_key(plugin_name, base_plugin)
+
+
+def _resolve_targets(name: str) -> tuple[str, list[str]] | None:
+    """将命令参数解析为单个功能或功能组。"""
+    base_plugin, plugin_groups = _load_toggle_table()
+    display_to_key = _display_to_key_map(base_plugin)
+
+    if name in display_to_key:
+        return name, [name]
+
+    members = plugin_groups.get(name)
+    if members:
+        valid_members = [member for member in members if member in display_to_key]
+        if valid_members:
+            return name, valid_members
+    return None
+
+
+def _set_feature_states(
+    group_data: dict[str, Any],
+    target_names: list[str],
+    enabled: bool,
+) -> bool:
+    """设置目标功能状态；有任意变更时返回 True。"""
+    toggles = group_data.get("toggle", {})
+    if not isinstance(toggles, dict):
+        return False
+
+    changed = False
+    for name in target_names:
+        if toggles.get(name) is not enabled:
+            toggles[name] = enabled
+            changed = True
+    return changed
 
 
 # ==================== 全局预处理器 ====================
 @run_preprocessor
-async def toggle_check(matcher: Matcher, event: Event):
-    """在每个 Matcher 执行前检查功能开关"""
-    # 仅处理群消息
+async def toggle_check(bot: Bot, matcher: Matcher, event: Event):
+    """在每个 Matcher 执行前检查功能开关。"""
     if not isinstance(event, GroupMessageEvent):
         return
 
-    plugin_key = _get_plugin_key(matcher)
-
-    # 本插件或未注册插件不做拦截
-    if plugin_key is None or plugin_key == _SELF_PLUGIN:
+    feature_key = _resolve_feature_key(matcher)
+    if feature_key is None:
         return
 
     group_id = str(event.group_id)
-
-    # 默认开：默认启用，检查是否被禁用
-    if plugin_key in PLUGIN_REGISTRY:
-        if _is_disabled(plugin_key, group_id):
-            raise IgnoredException(
-                f"插件『{PLUGIN_REGISTRY[plugin_key]}』在群 {group_id} 已被禁用"
-            )
+    if await is_feature_enabled_async(bot, feature_key, group_id):
         return
 
-    # 隐藏：默认关闭，检查是否已启用
-    if plugin_key in HIDDEN_REGISTRY:
-        if not is_feature_enabled(plugin_key, group_id):
-            raise IgnoredException(
-                f"功能『{HIDDEN_REGISTRY[plugin_key]}』在群 {group_id} 未启用"
-            )
+    display_name = _resolve_display_name(feature_key) or feature_key
+    raise IgnoredException(f"功能『{display_name}』在群 {group_id} 已被禁用")
 
 
 # ==================== 注册命令 ====================
-list_cmd = on_command("功能列表", priority=1, block=True)
-enable_cmd = on_command(
-    "启用",
-    priority=1,
-    block=True,
-    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
-)
-disable_cmd = on_command(
-    "禁用",
-    priority=1,
-    block=True,
-    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
-)
+enable_cmd = on_command("启用", priority=1, block=True, permission=SUPERUSER)
+disable_cmd = on_command("禁用", priority=1, block=True, permission=SUPERUSER)
 
 
 # ==================== 命令处理 ====================
-@list_cmd.handle()
-async def handle_list(bot: Bot, event: GroupMessageEvent):
-    """处理 /功能列表 命令：展示本群所有功能的启用状态"""
-    group_id = str(event.group_id)
-
-    lines = ["『本群功能状态』", ""]
-    for key, display_name in PLUGIN_REGISTRY.items():
-        status = "❌ 已禁用" if _is_disabled(key, group_id) else "✅ 已启用"
-        lines.append(f"  {display_name}  {status}")
-
-    lines.append("")
-    lines.append("管理员可使用：")
-    lines.append("  /启用 <功能名>")
-    lines.append("  /禁用 <功能名>")
-
-    await list_cmd.finish("\n".join(lines))
-
-
 @enable_cmd.handle()
 async def handle_enable(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /启用 命令：在当前群启用指定功能"""
+    """处理 /启用 命令。"""
     name = args.extract_plain_text().strip()
     if not name:
-        await enable_cmd.finish(
-            f"请指定要启用的功能名，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
-        )
+        return
 
-    module_key = _DISPLAY_TO_MODULE.get(name)
-    hidden_key = _DISPLAY_TO_HIDDEN.get(name)
+    resolved = _resolve_targets(name)
+    if resolved is None:
+        return
 
-    if module_key is None and hidden_key is None:
-        await enable_cmd.finish(
-            f"未知功能『{name}』，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
-        )
-
+    display_name, target_names = resolved
     group_id = str(event.group_id)
-    config = _load_config()
+    group_data = await _ensure_group_toggle_async(bot, group_id)
 
-    if module_key:
-        # 默认开：从 disabled 列表中移除（若为插件组，同时移除其成员）
-        disabled = config.get("disabled", {}).get(group_id, [])
-        keys_to_remove = [module_key]
-        if module_key in PLUGIN_GROUPS:
-            keys_to_remove.extend(PLUGIN_GROUPS[module_key])
-        to_remove = [k for k in keys_to_remove if k in disabled]
-        if not to_remove:
-            await enable_cmd.finish(f"功能『{name}』在本群已经是启用状态")
-        for k in to_remove:
-            disabled.remove(k)
-        if not disabled:
-            config["disabled"].pop(group_id, None)
-        else:
-            config["disabled"][group_id] = disabled
-    else:
-        # 隐藏功能：添加到 enabled 列表
-        enabled = config.setdefault("enabled", {}).setdefault(group_id, [])
-        if hidden_key in enabled:
-            await enable_cmd.finish(f"功能『{name}』在本群已经是启用状态")
-        enabled.append(hidden_key)
+    changed = _set_feature_states(group_data, target_names, True)
+    if changed:
+        _write_json_file(_group_toggle_path(group_id), group_data)
+        await enable_cmd.finish(f"已在本群启用功能『{display_name}』✓")
 
-    _save_config(config)
-
-    await enable_cmd.finish(f"已在本群启用功能『{name}』✓")
+    await enable_cmd.finish(f"功能『{display_name}』在本群已经是启用状态")
 
 
 @disable_cmd.handle()
 async def handle_disable(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /禁用 命令：在当前群禁用指定功能"""
+    """处理 /禁用 命令。"""
     name = args.extract_plain_text().strip()
     if not name:
-        await disable_cmd.finish(
-            f"请指定要禁用的功能名，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
-        )
+        return
 
-    module_key = _DISPLAY_TO_MODULE.get(name)
-    hidden_key = _DISPLAY_TO_HIDDEN.get(name)
+    resolved = _resolve_targets(name)
+    if resolved is None:
+        return
 
-    if module_key is None and hidden_key is None:
-        await disable_cmd.finish(
-            f"未知功能『{name}』，可用功能：{'、'.join(_VISIBLE_DISPLAY_NAMES)}"
-        )
-
+    display_name, target_names = resolved
     group_id = str(event.group_id)
-    config = _load_config()
+    group_data = await _ensure_group_toggle_async(bot, group_id)
 
-    if module_key:
-        # 默认开：添加到 disabled 列表
-        disabled = config.setdefault("disabled", {}).setdefault(group_id, [])
-        if module_key in disabled:
-            await disable_cmd.finish(f"功能『{name}』在本群已经是禁用状态")
-        disabled.append(module_key)
-    else:
-        # 隐藏功能：从 enabled 列表中移除
-        enabled = config.get("enabled", {}).get(group_id, [])
-        if hidden_key not in enabled:
-            await disable_cmd.finish(f"功能『{name}』在本群已经是禁用状态")
-        enabled.remove(hidden_key)
-        if not enabled:
-            config.get("enabled", {}).pop(group_id, None)
-        else:
-            config["enabled"][group_id] = enabled
+    changed = _set_feature_states(group_data, target_names, False)
+    if changed:
+        _write_json_file(_group_toggle_path(group_id), group_data)
+        await disable_cmd.finish(f"已在本群禁用功能『{display_name}』✓")
 
-    _save_config(config)
-
-    await disable_cmd.finish(f"已在本群禁用功能『{name}』✓")
+    await disable_cmd.finish(f"功能『{display_name}』在本群已经是禁用状态")

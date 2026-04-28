@@ -210,23 +210,6 @@
         ]
     },
     {
-        "module": "功能管理",
-        "function": [
-            {
-                "command": "/功能列表",
-                "description": "查看本群所有功能的状态"
-            },
-            {
-                "command": "/启用 <功能名>",
-                "description": "在本群启用指定功能（仅管理）"
-            },
-            {
-                "command": "/禁用 <功能名>",
-                "description": "在本群禁用指定功能（仅管理）"
-            }
-        ]
-    },
-    {
         "module": "贴表情",
         "function": [
             {

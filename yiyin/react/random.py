@@ -16,7 +16,7 @@ from nonebot import on_message
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 from nonebot.rule import Rule
 
-from yiyin.toggle import is_feature_enabled
+from yiyin.toggle import is_feature_enabled_async
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 STATE_PATH = PROJECT_ROOT / "data" / "react" / "random.json"
@@ -106,9 +106,9 @@ def _not_from_bot(event: GroupMessageEvent) -> bool:
     return str(event.self_id) != str(event.user_id)
 
 
-async def _random_enabled(event: GroupMessageEvent) -> bool:
+async def _random_enabled(bot: Bot, event: GroupMessageEvent) -> bool:
     """仅在当前群启用了乱序复读功能时触发。"""
-    return is_feature_enabled(_FEATURE_KEY, str(event.group_id))
+    return await is_feature_enabled_async(bot, _FEATURE_KEY, str(event.group_id))
 
 
 async def _should_handle_random(event: GroupMessageEvent) -> bool:

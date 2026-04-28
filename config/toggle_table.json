@@ -1,0 +1,55 @@
+{
+  "base_plugin": {
+    "yiyin.blacklist": "黑名单",
+    "yiyin.chain.dinner": "吃饭接龙",
+    "yiyin.chain.ktv": "KTV接龙",
+    "yiyin.choose": "随机选择",
+    "yiyin.emoji_reaction": "贴表情",
+    "yiyin.food": "食物图鉴",
+    "yiyin.food.auto_collect": "自动食物收集",
+    "yiyin.help": "帮助",
+    "yiyin.meme.motis": "想",
+    "yiyin.meme.symmetric": "对称",
+    "yiyin.meme.xnn": "男娘",
+    "yiyin.meme.ziming": "强强",
+    "yiyin.mohe": "摩诃",
+    "yiyin.msg_withdraw": "撤回",
+    "yiyin.quotes": "群友语录",
+    "yiyin.react.deny": "否定",
+    "yiyin.react.must": "一定要",
+    "yiyin.react.pick": "选择",
+    "yiyin.react.random": "乱序复读",
+    "yiyin.react.react": "回应",
+    "yiyin.react.repetition": "复读",
+    "yiyin.score_image": "成绩图处理",
+    "yiyin.tarot": "塔罗牌",
+    "yiyin.translate": "翻译",
+    "yiyin.vayu": "随蓝",
+    "yiyin.word_spelling": "拼词",
+    "nonebot_plugin_emojimix": "Emoji合成",
+    "nonebot_plugin_fakemsg": "伪造消息",
+    "nonebot_plugin_memes": "随机表情"
+  },
+  "plugin_groups": {
+    "广义回应": [
+      "回应",
+      "一定要",
+      "选择",
+      "否定",
+      "复读",
+      "乱序复读"
+    ],
+    "表情制作": [
+      "对称",
+      "强强",
+      "想",
+      "男娘",
+      "随机表情",
+      "Emoji合成"
+    ],
+    "接龙": [
+      "吃饭接龙",
+      "KTV接龙"
+    ]
+  }
+}

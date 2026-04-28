@@ -256,6 +256,25 @@ def _is_msg_emoji_like(event: NoticeEvent) -> bool:
     return isinstance(event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent))
 
 
+async def _should_handle_auto_collect_emoji(event: NoticeEvent) -> bool:
+    """仅在确实需要自动补充新表情 ID 时才进入 matcher。"""
+    if not _is_msg_emoji_like(event):
+        return False
+
+    emoji_id = _extract_notice_emoji_id(event)
+    if emoji_id is None:
+        return False
+
+    config = _load_config()
+    if _is_in_interval(config, emoji_id):
+        return False
+    if emoji_id in config["add"] or emoji_id in config["remove"]:
+        return False
+
+    setattr(event, "_yiyin_auto_collect_emoji_id", emoji_id)
+    return True
+
+
 # ==================== 群友贴表情 → 机器人跟贴 387 ====================
 _TRIGGER_EMOJI_IDS = frozenset({"128514", "182"})
 _MIRROR_EMOJI_ID = "387"
@@ -295,7 +314,7 @@ async def handle_emoji_mirror387(
 
 # ==================== 自动拾取贴表情 ID ====================
 emoji_auto_collect_notice = on_notice(
-    Rule(_is_msg_emoji_like),
+    Rule(_should_handle_auto_collect_emoji),
     priority=60,
     block=False,
 )
@@ -303,20 +322,25 @@ emoji_auto_collect_notice = on_notice(
 
 @emoji_auto_collect_notice.handle()
 async def handle_auto_collect_emoji_id(
+    bot: Bot,
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
-    emoji_id = _extract_notice_emoji_id(event)
-    if emoji_id is None:
+    emoji_id = getattr(event, "_yiyin_auto_collect_emoji_id", None)
+    if not isinstance(emoji_id, int):
         return
 
     config = _load_config()
-    if _is_in_interval(config, emoji_id):
-        return
-    if emoji_id in config["add"] or emoji_id in config["remove"]:
-        return
-
     config["add"].append(emoji_id)
     _save_config(config)
+
+    if event.group_id:
+        try:
+            await bot.send_group_msg(
+                group_id=event.group_id,
+                message=f"新增表情id：{emoji_id}",
+            )
+        except Exception:
+            pass
 
 
 # ==================== 注册命令 ====================

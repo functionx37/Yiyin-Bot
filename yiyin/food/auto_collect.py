@@ -18,7 +18,7 @@ from nonebot.rule import Rule
 
 from yiyin.food import add_food_from_image_url
 from yiyin.food.llm_recognition import recognize_food_from_image_bytes
-from yiyin.toggle import is_feature_enabled
+from yiyin.toggle import is_feature_enabled_async
 
 # ==================== 配置 ====================
 # 图片 URL 去重：同一张图只请求识别一次（LRU 缓存，防止重复转发刷 API）
@@ -52,9 +52,11 @@ def _not_from_bot(event: GroupMessageEvent) -> bool:
     return event.self_id != event.user_id
 
 
-async def _auto_collect_enabled(event: GroupMessageEvent) -> bool:
+async def _auto_collect_enabled(bot: Bot, event: GroupMessageEvent) -> bool:
     """本群已启用自动食物收集功能"""
-    return is_feature_enabled("yiyin.food.auto_collect", str(event.group_id))
+    return await is_feature_enabled_async(
+        bot, "yiyin.food.auto_collect", str(event.group_id)
+    )
 
 
 # GIF 文件头魔数

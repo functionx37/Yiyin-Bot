@@ -172,13 +172,13 @@ def _first_image_segment(event: GroupMessageEvent) -> MessageSegment | None:
     return None
 
 
-async def _should_handle_auto_collect(event: GroupMessageEvent) -> bool:
+async def _should_handle_auto_collect(bot: Bot, event: GroupMessageEvent) -> bool:
     """仅在图片通过静默过滤后才进入 matcher。"""
     if not _not_from_bot(event):
         return False
     if not _has_image_no_face(event):
         return False
-    if not await _auto_collect_enabled(event):
+    if not await _auto_collect_enabled(bot, event):
         return False
 
     image_seg = _first_image_segment(event)

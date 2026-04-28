@@ -111,11 +111,11 @@ async def _random_enabled(bot: Bot, event: GroupMessageEvent) -> bool:
     return await is_feature_enabled_async(bot, _FEATURE_KEY, str(event.group_id))
 
 
-async def _should_handle_random(event: GroupMessageEvent) -> bool:
+async def _should_handle_random(bot: Bot, event: GroupMessageEvent) -> bool:
     """仅在真正需要触发乱序复读时才进入 matcher。"""
     if not _not_from_bot(event):
         return False
-    if not await _random_enabled(event):
+    if not await _random_enabled(bot, event):
         return False
     if getattr(event, "_yiyin_repetition_triggered", False):
         return False

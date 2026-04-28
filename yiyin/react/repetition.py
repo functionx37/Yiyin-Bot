@@ -271,11 +271,11 @@ async def _repetition_enabled(bot: Bot, event: GroupMessageEvent) -> bool:
     return await is_feature_enabled_async(bot, _FEATURE_KEY, str(event.group_id))
 
 
-async def _should_handle_repetition(event: GroupMessageEvent) -> bool:
+async def _should_handle_repetition(bot: Bot, event: GroupMessageEvent) -> bool:
     """仅在真正需要触发复读时才进入 matcher。"""
     if not _not_from_bot(event):
         return False
-    if not await _repetition_enabled(event):
+    if not await _repetition_enabled(bot, event):
         return False
 
     group_id = str(event.group_id)

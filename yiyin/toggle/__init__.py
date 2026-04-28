@@ -237,12 +237,17 @@ def is_plugin_enabled(plugin_key: str, group_id: str) -> bool:
 
 
 def _match_registered_key(candidate: str, base_plugin: dict[str, str]) -> str | None:
-    """按精确匹配和最长前缀匹配注册表中的功能键。"""
+    """按精确、前缀和短名匹配注册表中的功能键。"""
     if candidate in base_plugin:
         return candidate
 
     for key in sorted(base_plugin.keys(), key=len, reverse=True):
         if candidate.startswith(f"{key}.") or candidate.startswith(f"{key}:"):
+            return key
+
+    for key in sorted(base_plugin.keys(), key=len, reverse=True):
+        short_name = key.rsplit(".", 1)[-1]
+        if candidate == short_name:
             return key
     return None
 
@@ -264,14 +269,29 @@ def _resolve_feature_key(matcher: Matcher) -> str | None:
     if not base_plugin:
         return None
 
+    candidates: list[str] = []
+
+    module_name = getattr(matcher, "module_name", None)
+    if isinstance(module_name, str):
+        candidates.append(module_name)
+
+    plugin_name_attr = getattr(matcher, "plugin_name", None)
+    if isinstance(plugin_name_attr, str):
+        candidates.append(plugin_name_attr)
+
+    candidates.append(plugin_name)
+
     for handler in matcher.handlers:
         module_name = getattr(handler, "__module__", None)
         if isinstance(module_name, str):
-            matched = _match_registered_key(module_name, base_plugin)
-            if matched is not None:
-                return matched
+            candidates.append(module_name)
 
-    return _match_registered_key(plugin_name, base_plugin)
+    for candidate in candidates:
+        matched = _match_registered_key(candidate, base_plugin)
+        if matched is not None:
+            return matched
+
+    return None
 
 
 def _resolve_targets(name: str) -> tuple[str, list[str]] | None:

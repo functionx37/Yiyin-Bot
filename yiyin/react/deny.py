@@ -30,6 +30,38 @@ def _extract_sentence(text: str) -> str | None:
     return None
 
 
+def _swap_person_pronouns(text: str) -> str:
+    """将常见第一/第二人称互换，避免原句直接照搬。"""
+    placeholders = {
+        "你们": "__P2_PLURAL__",
+        "我们": "__P1_PLURAL__",
+        "你的": "__P2_POSSESSIVE__",
+        "我的": "__P1_POSSESSIVE__",
+        "您的": "__P2_POLITE_POSSESSIVE__",
+        "咱们": "__P1_INCLUSIVE_PLURAL__",
+        "咱": "__P1_INCLUSIVE__",
+        "你": "__P2__",
+        "我": "__P1__",
+        "您": "__P2_POLITE__",
+    }
+    swapped = text
+    for source, placeholder in placeholders.items():
+        swapped = swapped.replace(source, placeholder)
+
+    return (
+        swapped.replace("__P2_PLURAL__", "我们")
+        .replace("__P1_PLURAL__", "你们")
+        .replace("__P2_POSSESSIVE__", "我的")
+        .replace("__P1_POSSESSIVE__", "你的")
+        .replace("__P2_POLITE_POSSESSIVE__", "我的")
+        .replace("__P1_INCLUSIVE_PLURAL__", "你们")
+        .replace("__P1_INCLUSIVE__", "你")
+        .replace("__P2__", "我")
+        .replace("__P1__", "你")
+        .replace("__P2_POLITE__", "我")
+    )
+
+
 def _not_from_bot(event: GroupMessageEvent) -> bool:
     """忽略机器人自己发送的消息。"""
     return str(event.self_id) != str(event.user_id)
@@ -62,4 +94,5 @@ async def handle_deny(event: GroupMessageEvent):
     if sentence is None:
         return
 
-    await deny_matcher.finish(f"我们不认为{sentence},您囍疯。")
+    swapped_sentence = _swap_person_pronouns(sentence)
+    await deny_matcher.finish(f"我们不认为{swapped_sentence},您囍疯。")

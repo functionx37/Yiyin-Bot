@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 from typing import Any, Union
 
-from nonebot import on_command, on_notice
+from nonebot import on_command, on_message, on_notice
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.adapters.onebot.v11.event import NoticeEvent
 from nonebot.params import CommandArg
@@ -257,6 +257,19 @@ def _is_msg_emoji_like(event: NoticeEvent) -> bool:
     return isinstance(event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent))
 
 
+def _extract_hash_stick_text(event: GroupMessageEvent) -> str | None:
+    """提取 #贴 命令后的参数文本。"""
+    text = event.get_message().extract_plain_text().strip()
+    m = re.fullmatch(r"#贴\s*(.*)", text)
+    if not m:
+        return None
+    return m.group(1).strip()
+
+
+def _is_hash_stick(event: GroupMessageEvent) -> bool:
+    return _extract_hash_stick_text(event) is not None
+
+
 def _is_notice_from_bot(event: NoticeEvent) -> bool:
     """是否为 bot 自己触发的贴表情事件。"""
     return str(getattr(event, "user_id", "")) == str(getattr(event, "self_id", ""))
@@ -330,7 +343,6 @@ emoji_auto_collect_notice = on_notice(
 
 @emoji_auto_collect_notice.handle()
 async def handle_auto_collect_emoji_id(
-    bot: Bot,
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
     emoji_id = getattr(event, "_yiyin_auto_collect_emoji_id", None)
@@ -341,19 +353,11 @@ async def handle_auto_collect_emoji_id(
     config["add"].append(emoji_id)
     _save_config(config)
 
-    if event.group_id:
-        try:
-            await bot.send_group_msg(
-                group_id=event.group_id,
-                message=f"新增表情id：{emoji_id}",
-            )
-        except Exception:
-            pass
-
 
 # ==================== 注册命令 ====================
 list_cmd = on_command("贴表情列表", priority=10, block=True)
 stick_cmd = on_command("贴", priority=10, block=True)
+hash_stick_matcher = on_message(Rule(_is_hash_stick), priority=10, block=True)
 send_cmd = on_command("发", priority=10, block=True)
 alias_cmd = on_command("贴表情别名", priority=10, block=True)
 add_cmd = on_command("贴表情新增", priority=10, block=True, permission=SUPERUSER)
@@ -383,10 +387,14 @@ async def handle_emoji_list(bot: Bot, event: GroupMessageEvent):
 
 
 # ==================== /贴 ====================
-@stick_cmd.handle()
-async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+async def _do_stick(
+    bot: Bot,
+    event: GroupMessageEvent,
+    text: str,
+    *,
+    silent: bool,
+) -> None:
     target_msg_id = event.reply.message_id if event.reply else event.message_id
-    text = args.extract_plain_text().strip()
     if not text:
         return
 
@@ -410,7 +418,8 @@ async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             except Exception:
                 pass
             await asyncio.sleep(0.3)
-        await stick_cmd.finish("贴了以下表情：\n" + _chunk_ids(ids))
+        if not silent:
+            await stick_cmd.finish("贴了以下表情：\n" + _chunk_ids(ids))
         return
 
     # "A~B" → 顺序贴区间内所有表情
@@ -422,7 +431,9 @@ async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             start, end = end, start
         ids = list(range(start, end + 1))
         if len(ids) > MAX_RANDOM_COUNT:
-            await stick_cmd.finish(f"连续贴表情最多支持 {MAX_RANDOM_COUNT} 个 ID")
+            if not silent:
+                await stick_cmd.finish(f"连续贴表情最多支持 {MAX_RANDOM_COUNT} 个 ID")
+            return
         for eid in ids:
             try:
                 await bot.call_api(
@@ -433,7 +444,8 @@ async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             except Exception:
                 pass
             await asyncio.sleep(0.3)
-        await stick_cmd.finish("贴了以下表情：\n" + _chunk_ids(ids))
+        if not silent:
+            await stick_cmd.finish("贴了以下表情：\n" + _chunk_ids(ids))
         return
 
     emoji_id = _resolve_emoji_id(text, config)
@@ -447,6 +459,20 @@ async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         )
     except Exception:
         pass
+
+
+@stick_cmd.handle()
+async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    text = args.extract_plain_text().strip()
+    await _do_stick(bot, event, text, silent=False)
+
+
+@hash_stick_matcher.handle()
+async def handle_hash_stick(bot: Bot, event: GroupMessageEvent):
+    text = _extract_hash_stick_text(event)
+    if text is None:
+        return
+    await _do_stick(bot, event, text, silent=True)
 
 
 # ==================== /发 ====================

@@ -3,6 +3,7 @@ NoneBot2 贴表情 / 发表情插件
 - 命令：/贴表情列表                — 发送使用方法和部分表情预览
 - 命令：/贴 <ID/别名> [引用]       — 给引用的消息贴上指定表情
 - 命令：/贴<数字>个 [引用]          — 给引用的消息随机贴上指定个数的表情
+- 命令：/贴 <起始ID~结束ID> [引用]   — 给引用的消息依次贴上区间内所有表情
 - 命令：/发 <ID/别名>              — 发送对应ID的QQ系统表情
 - 命令：/发 随机                   — 随机发送一个QQ系统表情
 - 命令：/贴表情别名 <ID> <别名>     — 绑定表情别名
@@ -256,9 +257,16 @@ def _is_msg_emoji_like(event: NoticeEvent) -> bool:
     return isinstance(event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent))
 
 
+def _is_notice_from_bot(event: NoticeEvent) -> bool:
+    """是否为 bot 自己触发的贴表情事件。"""
+    return str(getattr(event, "user_id", "")) == str(getattr(event, "self_id", ""))
+
+
 async def _should_handle_auto_collect_emoji(event: NoticeEvent) -> bool:
     """仅在确实需要自动补充新表情 ID 时才进入 matcher。"""
     if not _is_msg_emoji_like(event):
+        return False
+    if _is_notice_from_bot(event):
         return False
 
     emoji_id = _extract_notice_emoji_id(event)
@@ -392,6 +400,29 @@ async def handle_stick(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         if count < 1:
             return
         ids = random.sample(pool, count)
+        for eid in ids:
+            try:
+                await bot.call_api(
+                    "set_msg_emoji_like",
+                    message_id=target_msg_id,
+                    emoji_id=str(eid),
+                )
+            except Exception:
+                pass
+            await asyncio.sleep(0.3)
+        await stick_cmd.finish("贴了以下表情：\n" + _chunk_ids(ids))
+        return
+
+    # "A~B" → 顺序贴区间内所有表情
+    m = _ID_RANGE_RE.match(text)
+    if m:
+        start = int(m.group(1))
+        end = int(m.group(2))
+        if start > end:
+            start, end = end, start
+        ids = list(range(start, end + 1))
+        if len(ids) > MAX_RANDOM_COUNT:
+            await stick_cmd.finish(f"连续贴表情最多支持 {MAX_RANDOM_COUNT} 个 ID")
         for eid in ids:
             try:
                 await bot.call_api(

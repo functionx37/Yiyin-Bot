@@ -73,7 +73,7 @@ OneBotV11Adapter.add_custom_model(MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoti
 
 _APOLOGY_EMOJI_ID = "100"  # 糗大了
 
-_FOOD_ID_RE = re.compile(r"食物ID[：:]\s*([A-Za-z0-9]+)")
+_FOOD_IDS_RE = re.compile(r"食物ID[：:]\s*([A-Za-z0-9]+(?:\s*[、]\s*[A-Za-z0-9]+)*)")
 
 
 async def _extract_recalled_text(bot: Bot, message_id: int) -> str:
@@ -94,10 +94,16 @@ async def _extract_recalled_text(bot: Bot, message_id: int) -> str:
     return ""
 
 
-def _parse_food_id(text: str) -> str | None:
-    """从消息文本中解析食物 ID（自动食物收集添加食物时的格式）"""
-    m = _FOOD_ID_RE.search(text)
-    return m.group(1) if m else None
+def _parse_food_ids(text: str) -> list[str]:
+    """从成功收集食物提示中解析食物 ID 列表。"""
+    m = _FOOD_IDS_RE.search(text)
+    if not m:
+        return []
+    ids: list[str] = []
+    for food_id in re.split(r"\s*[、]\s*", m.group(1).strip()):
+        if food_id and food_id not in ids:
+            ids.append(food_id)
+    return ids
 
 
 def _is_msg_emoji_like(event: NoticeEvent) -> bool:
@@ -147,26 +153,27 @@ async def handle_msg_withdraw(
     except Exception:
         return
 
-    # 若为自动食物收集的食物添加消息，先删除对应食物记录
-    deleted_food_id: str | None = None
+    # 若为成功收集食物的提示消息，则同步删除对应食物记录
+    deleted_food_ids: list[str] = []
     text = await _extract_recalled_text(bot, bot_msg_id)
-    food_id = _parse_food_id(text)
-    if food_id:
-        if delete_food(group_id, food_id):
-            deleted_food_id = food_id
+    food_ids = _parse_food_ids(text)
 
-    # 仅尝试撤回，超时失败也不影响后续操作
+    # 先尝试撤回，失败也不影响后续删除
     try:
         await bot.call_api("delete_msg", message_id=bot_msg_id)
     except Exception as e:
         logger.warning(f"撤回消息失败（可能超时）: {e}")
 
+    for food_id in food_ids:
+        if delete_food(group_id, food_id):
+            deleted_food_ids.append(food_id)
+
     # 若删除了食物记录，发送通知（无论撤回是否成功）
-    if deleted_food_id:
+    if deleted_food_ids:
         try:
             await bot.send_group_msg(
                 group_id=event.group_id,
-                message=f"已删除对应食物记录（ID：{deleted_food_id}）",
+                message=f"已删除对应食物记录（ID：{'、'.join(deleted_food_ids)}）",
             )
         except Exception as e:
             logger.warning(f"发送食物删除通知失败: {e}")

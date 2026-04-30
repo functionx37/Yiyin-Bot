@@ -28,7 +28,9 @@ from nonebot.adapters.onebot.v11.event import NoticeEvent
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 from nonebot.rule import Rule
+from nonebot import get_driver
 
+from yiyin.food import save_foods_from_image_urls
 from yiyin.msg_withdraw import GroupMsgEmojiLikeNoticeEvent, MsgEmojiLikeNoticeEvent
 
 # ==================== 资源路径 ====================
@@ -299,6 +301,7 @@ async def _should_handle_auto_collect_emoji(event: NoticeEvent) -> bool:
 # ==================== 群友贴表情 → 机器人跟贴 387 ====================
 _TRIGGER_EMOJI_IDS = frozenset({"128514", "182"})
 _MIRROR_EMOJI_ID = "387"
+_COLLECT_FOOD_EMOJI_ID = "127838"
 
 
 def _is_mirror387_trigger(event: NoticeEvent) -> bool:
@@ -306,6 +309,44 @@ def _is_mirror387_trigger(event: NoticeEvent) -> bool:
     if not isinstance(event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent)):
         return False
     return event.emoji_id in _TRIGGER_EMOJI_IDS
+
+
+def _is_superuser_user_id(user_id: str) -> bool:
+    """判断用户是否为超级管理员。"""
+    superusers = get_driver().config.superusers
+    return user_id in {str(uid) for uid in superusers}
+
+
+async def _extract_message_image_urls(bot: Bot, message_id: int) -> list[str]:
+    """读取目标消息中的图片 URL。"""
+    try:
+        msg_data = await bot.get_msg(message_id=message_id)
+    except Exception:
+        return []
+
+    raw_msg = msg_data.get("message", [])
+    urls: list[str] = []
+    if isinstance(raw_msg, Message):
+        segments = raw_msg
+    elif isinstance(raw_msg, str):
+        segments = Message(raw_msg)
+    elif isinstance(raw_msg, list):
+        segments = []
+        for seg in raw_msg:
+            if isinstance(seg, MessageSegment):
+                segments.append(seg)
+            elif isinstance(seg, dict):
+                segments.append(MessageSegment(seg.get("type", ""), seg.get("data", {})))
+    else:
+        return []
+
+    for seg in segments:
+        if seg.type != "image":
+            continue
+        url = seg.data.get("url")
+        if url:
+            urls.append(url)
+    return urls
 
 
 emoji_mirror387_notice = on_notice(
@@ -328,6 +369,54 @@ async def handle_emoji_mirror387(
             "set_msg_emoji_like",
             message_id=event.message_id,
             emoji_id=_MIRROR_EMOJI_ID,
+        )
+    except Exception:
+        pass
+
+
+def _is_collect_food_trigger(event: NoticeEvent) -> bool:
+    """超级管理员贴 127838 时，按收集食物处理。"""
+    if not isinstance(event, (MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent)):
+        return False
+    if event.emoji_id != _COLLECT_FOOD_EMOJI_ID:
+        return False
+    return _is_superuser_user_id(str(event.user_id))
+
+
+emoji_collect_food_notice = on_notice(
+    Rule(_is_collect_food_trigger),
+    priority=7,
+    block=False,
+)
+
+
+@emoji_collect_food_notice.handle()
+async def handle_emoji_collect_food(
+    bot: Bot,
+    event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
+):
+    """超级管理员给含图消息贴 127838 时，视为引用并收集食物。"""
+    if not event.group_id:
+        return
+
+    image_urls = await _extract_message_image_urls(bot, event.message_id)
+    if not image_urls:
+        return
+
+    result = await save_foods_from_image_urls(
+        str(event.group_id),
+        image_urls,
+        None,
+        name_only_with_llm=True,
+        log_prefix="贴表情收集食物自动命名",
+    )
+    if not result:
+        return
+
+    try:
+        await bot.send_group_msg(
+            group_id=event.group_id,
+            message=MessageSegment.reply(event.message_id) + MessageSegment.text(result),
         )
     except Exception:
         pass

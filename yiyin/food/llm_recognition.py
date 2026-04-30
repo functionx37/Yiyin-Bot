@@ -32,6 +32,16 @@ FOOD_PROMPT = """你是一个严格的图片分类器，你需要判断图本身
 
 只输出 FOOD:xxx 或 OTHER 之一，不要解释。"""
 
+FOOD_NAME_PROMPT = """这是一张已经明确要收集到食物图鉴中的图片，请你仅根据图片内容，为它生成一个简短、具体、自然的食物名称。
+
+要求：
+1. 默认把图片主体视为食物，不要再判断它是不是食物。
+2. 只回复一个名称，不要解释，不要加前缀，不要加标点。
+3. 名称尽量具体，如“蛋炒饭”“拿铁”“炸鸡”“苹果”“薯片”“火锅”。
+4. 最多 10 个字。
+5. 如果图片信息不足，就给一个尽量宽泛但仍像食物名的名称，如“点心”“饮料”“零食”。
+"""
+
 
 def _build_data_url(image_bytes: bytes, content_type: str | None) -> str:
     """将图片二进制转为 data URL，避免模型侧再次拉取外链图片。"""
@@ -115,3 +125,66 @@ async def recognize_food_from_image_bytes(
                 return "OTHER", None
         await asyncio.sleep(1)
     return parse_food_llm_response(reply)
+
+
+async def suggest_food_name_from_image_bytes(
+    image_bytes: bytes,
+    content_type: str | None,
+    *,
+    log_prefix: str = "食物命名",
+) -> str | None:
+    """调用 LLM 为已明确要收集的图片生成建议食物名。"""
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": FOOD_NAME_PROMPT},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": _build_data_url(image_bytes, content_type)},
+                },
+            ],
+        }
+    ]
+    reply: str | None = None
+    for attempt in range(2):
+        try:
+            reply = await chat_completion(
+                messages,
+                model=IMAGE_RECOG_MODEL,
+                temperature=0.1,
+                max_tokens=32,
+                timeout=90,
+                raise_on_error=True,
+            )
+            if reply and reply.strip():
+                return reply.strip()[:10]
+            logger.warning(
+                "{} LLM 成功返回但内容为空{}",
+                log_prefix,
+                f" (第{attempt + 1}次)" if attempt == 0 else "（重试后）",
+            )
+            if attempt == 1:
+                return None
+        except ChatCompletionTransportError as e:
+            logger.warning(
+                "{} LLM 请求失败{}: {}",
+                log_prefix,
+                f" (第{attempt + 1}次)" if attempt == 0 else "（重试后）",
+                e,
+            )
+            if attempt == 1:
+                logger.exception("{} LLM 重试后仍失败", log_prefix)
+                return None
+        except Exception as e:
+            logger.warning(
+                "{} LLM 处理异常{}: {}",
+                log_prefix,
+                f" (第{attempt + 1}次)" if attempt == 0 else "（重试后）",
+                e,
+            )
+            if attempt == 1:
+                logger.exception("{} LLM 重试后仍失败", log_prefix)
+                return None
+        await asyncio.sleep(1)
+    return None

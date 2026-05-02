@@ -32,7 +32,7 @@ Python包依赖使用 **uv** 进行管理。
         cd napcat
         napcat
         # 根据提示新建一个网络配置，添加一个 WebSocket 客户端（反向 WS）
-        # URL：`ws://nonebot:8080/onebot/v11/ws`
+        # URL：`ws://localhost:8080/onebot/v11/ws`
         # Token：`.env.prod` 中设置的 `ONEBOT_ACCESS_TOKEN`
         # 启用该配置，并根据提示扫码登录
     ```

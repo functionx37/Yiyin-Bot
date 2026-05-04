@@ -222,6 +222,57 @@ def _get_tags(entry: dict) -> list[str]:
     return []
 
 
+def _has_hidden_been_selected(entry: dict) -> bool:
+    """隐藏食物是否已在当前轮次中被随机过，兼容旧数据。"""
+    return bool(entry.get("hidden_selected"))
+
+
+def _get_hidden_food_ids(
+    index: dict[str, dict], *, only_unrandomed: bool = False
+) -> list[str]:
+    """获取隐藏食物 ID；可选仅返回当前轮次尚未随机过的项。"""
+    result: list[str] = []
+    for sid, entry in index.items():
+        if not entry.get("hidden"):
+            continue
+        if only_unrandomed and _has_hidden_been_selected(entry):
+            continue
+        result.append(sid)
+    return result
+
+
+def _clear_hidden_selected_marks(index: dict[str, dict]) -> bool:
+    """清除所有隐藏食物的已随机标记。"""
+    changed = False
+    for entry in index.values():
+        if not entry.get("hidden"):
+            continue
+        if "hidden_selected" in entry:
+            entry.pop("hidden_selected", None)
+            changed = True
+    return changed
+
+
+def _pick_hidden_food_for_random(index: dict[str, dict]) -> tuple[str | None, bool]:
+    """按轮次抽取隐藏食物，并在抽中后写入已随机标记。"""
+    hidden_ids = _get_hidden_food_ids(index)
+    if not hidden_ids:
+        return None, False
+
+    available_ids = _get_hidden_food_ids(index, only_unrandomed=True)
+    changed = False
+    if not available_ids:
+        changed = _clear_hidden_selected_marks(index)
+        available_ids = hidden_ids
+
+    short_id = random.choice(available_ids)
+    entry = index[short_id]
+    if not _has_hidden_been_selected(entry):
+        entry["hidden_selected"] = True
+        changed = True
+    return short_id, changed
+
+
 def _resolve_id_or_name(
     group_id: str, id_or_name: str, *, allow_dup: bool = False
 ) -> tuple[list[str] | None, str | None]:
@@ -811,7 +862,7 @@ async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
 
     # 分离普通食物与隐藏食物
     normal_ids = [sid for sid, e in index.items() if not e.get("hidden")]
-    hidden_ids = [sid for sid, e in index.items() if e.get("hidden")]
+    hidden_ids = _get_hidden_food_ids(index)
 
     # 若有隐藏食物，按概率判定是否触发
     triggered_hidden = False
@@ -824,8 +875,12 @@ async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
             _save_hidden_prob(group_id, min(100, prob + 1))  # 未中则 +1%
 
     if triggered_hidden and hidden_ids:
-        # 从隐藏食物中抽取
-        short_id = random.choice(hidden_ids)
+        # 从本轮尚未抽中过的隐藏食物中抽取；若已全部抽过则清空标记后重开一轮
+        short_id, index_changed = _pick_hidden_food_for_random(index)
+        if not short_id:
+            return
+        if index_changed:
+            _save_index(group_id, index)
         entry = index[short_id]
         name = entry.get("name") or short_id
         food_name = name.strip() if name and name.strip() else short_id

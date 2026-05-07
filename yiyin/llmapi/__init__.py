@@ -1,6 +1,7 @@
 """
 可复用的 LLM API 调用模块
-- 基于 OpenAI 兼容接口（云雾 API 中转站，https://yunwu.apifox.cn/）
+- 基于 OpenAI 兼容接口，默认读取通用环境变量 LLM_BASE_URL / LLM_API_KEY
+- 兼容旧版 YUNWU_BASE_URL / YUNWU_API_KEY，便于平滑迁移
 - 支持纯文本对话、识图（Vision）多模态输入、参考图生成图片
 - 供其他插件调用，例如：
     from yiyin.llmapi import chat_completion, describe_image, generate_image_edit
@@ -30,10 +31,15 @@ class ChatCompletionTransportError(ChatCompletionError):
     """Chat completion 在网络传输阶段失败。"""
 
 
+def _get_env_value(primary_name: str, legacy_name: str, default: str = "") -> str:
+    """优先读取新的通用变量名，缺失时回退到旧变量名。"""
+    return os.environ.get(primary_name) or os.environ.get(legacy_name) or default
+
+
 def _get_api_key() -> str:
-    """获取 YUNWU_API_KEY，若为空则尝试加载 .env.prod 后重试（解决 nb run 子进程可能未读到的情况）"""
+    """获取 LLM_API_KEY，若为空则尝试加载 .env.prod 后重试。"""
     global _DOTENV_LOADED
-    key = os.environ.get("YUNWU_API_KEY", "")
+    key = _get_env_value("LLM_API_KEY", "YUNWU_API_KEY")
     if not key and not _DOTENV_LOADED:
         try:
             from dotenv import load_dotenv
@@ -42,9 +48,9 @@ def _get_api_key() -> str:
                 if p.exists():
                     load_dotenv(p)
                     _DOTENV_LOADED = True
-                    key = os.environ.get("YUNWU_API_KEY", "")
+                    key = _get_env_value("LLM_API_KEY", "YUNWU_API_KEY")
                     if key:
-                        logger.info("llmapi: 已从 {} 加载 YUNWU_API_KEY", f)
+                        logger.info("llmapi: 已从 {} 加载 LLM_API_KEY", f)
                     break
         except ImportError:
             pass
@@ -53,7 +59,7 @@ def _get_api_key() -> str:
 
 
 def _get_base_url() -> str:
-    return os.environ.get("YUNWU_BASE_URL", "https://yunwu.ai/v1")
+    return _get_env_value("LLM_BASE_URL", "YUNWU_BASE_URL", "https://yunwu.ai/v1")
 
 
 def _extract_text_from_content(content: Any) -> str | None:
@@ -215,7 +221,7 @@ async def chat_completion(
     支持纯文本与识图（Vision）多模态输入。识图时，messages 中 content 可为数组：
     [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}]
 
-    云雾 API 文档：https://yunwu.apifox.cn/
+    兼容任意 OpenAI 风格网关；默认示例地址为云雾 API：https://yunwu.apifox.cn/
 
     Args:
         messages: 对话消息列表。content 可为 str 或 list（多模态，含 image_url）
@@ -230,7 +236,9 @@ async def chat_completion(
     """
     api_key = _get_api_key()
     if not api_key:
-        logger.warning("YUNWU_API_KEY 未配置，跳过 LLM 请求。请在 .env.prod 中设置 YUNWU_API_KEY")
+        logger.warning(
+            "LLM_API_KEY 未配置，跳过 LLM 请求。请在 .env.prod 中设置 LLM_API_KEY"
+        )
         return None
 
     prepared_messages, converted_images, failed_image_inline = await _inline_image_urls(
@@ -340,7 +348,7 @@ async def describe_image(
 ) -> str | None:
     """使用 Vision 模型描述/理解图片，返回文本描述。
 
-    云雾 API 识图文档：https://yunwu.apifox.cn/ （创建聊天识图）
+    OpenAI 兼容 Vision 接口；云雾示例文档：https://yunwu.apifox.cn/
 
     Args:
         prompt: 对图片的提问或指令（如『简短描述这张图』）
@@ -398,7 +406,7 @@ async def generate_image_edit(
     """使用参考图 + 文字描述生成新图片，返回图片二进制数据列表。
 
     基于 OpenAI 兼容的 Images Edits 接口（POST /v1/images/edits，multipart/form-data）。
-    云雾 API 文档：https://yunwu.apifox.cn/
+    云雾示例文档：https://yunwu.apifox.cn/
 
     gpt-image-1 支持最多 16 张参考图，模型会综合参考图内容与文字描述来生成。
 
@@ -419,7 +427,9 @@ async def generate_image_edit(
     """
     api_key = _get_api_key()
     if not api_key:
-        logger.warning("YUNWU_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 YUNWU_API_KEY")
+        logger.warning(
+            "LLM_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 LLM_API_KEY"
+        )
         return None
 
     if not isinstance(image_sources, list):
@@ -549,7 +559,7 @@ async def generate_image_via_chat(
     """使用 Chat Completions 接口生成 / 编辑图片（Gemini 等原生多模态模型）。
 
     通过 /v1/chat/completions 发送多模态消息（文本 + base64 图片），
-    从响应 content 中提取生成的图片。适用于云雾 API 的 Gemini 图片创作 chat 兼容格式。
+    从响应 content 中提取生成的图片。适用于支持该兼容格式的 OpenAI 风格网关。
 
     Args:
         prompt: 文字描述 / 编辑指令
@@ -563,7 +573,9 @@ async def generate_image_via_chat(
     """
     api_key = _get_api_key()
     if not api_key:
-        logger.warning("YUNWU_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 YUNWU_API_KEY")
+        logger.warning(
+            "LLM_API_KEY 未配置，跳过图片生成请求。请在 .env.prod 中设置 LLM_API_KEY"
+        )
         return None
 
     if image_sources is not None and not isinstance(image_sources, list):

@@ -16,6 +16,7 @@ from nonebot.permission import SUPERUSER
 from nonebot.rule import Rule
 
 from yiyin.food import delete_food
+from yiyin.toggle import is_feature_enabled_async
 
 # ==================== 自定义事件模型 ====================
 # NapCat 上报 group_msg_emoji_like（群消息贴表情），结构为 likes: [{emoji_id, count}]
@@ -72,6 +73,7 @@ OneBotV11Adapter.add_custom_model(MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoti
 # ==================== 规则 ====================
 
 _APOLOGY_EMOJI_ID = "100"  # 糗大了
+_FEATURE_KEY = "yiyin.msg_withdraw"
 
 _FOOD_IDS_RE = re.compile(r"食物ID[：:]\s*([A-Za-z0-9]+(?:\s*[、]\s*[A-Za-z0-9]+)*)")
 
@@ -139,6 +141,8 @@ async def handle_msg_withdraw(
     """超级管理员对 bot 消息贴 id100 表情（糗大了）时：仅尝试撤回该消息"""
     # Rule 已保证 emoji_id==100；仅处理群消息（需 group_id 用于 delete_food 和 send）
     if not event.group_id:
+        return
+    if not await is_feature_enabled_async(bot, _FEATURE_KEY, str(event.group_id)):
         return
 
     bot_msg_id = event.message_id

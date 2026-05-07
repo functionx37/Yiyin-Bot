@@ -32,6 +32,7 @@ from nonebot import get_driver
 
 from yiyin.food import save_foods_from_image_urls
 from yiyin.msg_withdraw import GroupMsgEmojiLikeNoticeEvent, MsgEmojiLikeNoticeEvent
+from yiyin.toggle import is_feature_enabled_async
 
 # ==================== 资源路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -299,6 +300,7 @@ async def _should_handle_auto_collect_emoji(event: NoticeEvent) -> bool:
 
 
 # ==================== 群友贴表情 → 机器人跟贴 387 ====================
+_FEATURE_KEY = "yiyin.emoji_reaction"
 _TRIGGER_EMOJI_IDS = frozenset({"128514", "182"})
 _MIRROR_EMOJI_ID = "387"
 _COLLECT_FOOD_EMOJI_ID = "127838"
@@ -315,6 +317,16 @@ def _is_superuser_user_id(user_id: str) -> bool:
     """判断用户是否为超级管理员。"""
     superusers = get_driver().config.superusers
     return user_id in {str(uid) for uid in superusers}
+
+
+async def _emoji_reaction_enabled(
+    bot: Bot,
+    event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
+) -> bool:
+    """仅在当前群启用贴表情功能时处理贴表情通知。"""
+    if not event.group_id:
+        return False
+    return await is_feature_enabled_async(bot, _FEATURE_KEY, str(event.group_id))
 
 
 async def _extract_message_image_urls(bot: Bot, message_id: int) -> list[str]:
@@ -362,7 +374,7 @@ async def handle_emoji_mirror387(
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
     """任意群友对群消息贴 128514 或 182 时，机器人对该消息贴 387"""
-    if not event.group_id:
+    if not await _emoji_reaction_enabled(bot, event):
         return
     try:
         await bot.call_api(
@@ -396,7 +408,7 @@ async def handle_emoji_collect_food(
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
     """超级管理员给含图消息贴 127838 时，视为引用并收集食物。"""
-    if not event.group_id:
+    if not await _emoji_reaction_enabled(bot, event):
         return
 
     image_urls = await _extract_message_image_urls(bot, event.message_id)
@@ -432,8 +444,12 @@ emoji_auto_collect_notice = on_notice(
 
 @emoji_auto_collect_notice.handle()
 async def handle_auto_collect_emoji_id(
+    bot: Bot,
     event: Union[MsgEmojiLikeNoticeEvent, GroupMsgEmojiLikeNoticeEvent],
 ):
+    if not await _emoji_reaction_enabled(bot, event):
+        return
+
     emoji_id = getattr(event, "_yiyin_auto_collect_emoji_id", None)
     if not isinstance(emoji_id, int):
         return

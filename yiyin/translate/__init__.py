@@ -71,6 +71,6 @@ async def handle_translate(event: MessageEvent, args: Message = CommandArg()):
 
     result = await translate_text(text, target_lang)
     if result is None:
-        await translate_cmd.finish("翻译失败，请稍后重试。（请确认 YUNWU_API_KEY 已配置）")
+        await translate_cmd.finish("翻译失败，请稍后重试。（请确认 LLM_API_KEY 已配置）")
 
     await translate_cmd.finish(f"【翻译 → {target_lang}】\n{result}")

@@ -52,7 +52,13 @@ Python包依赖使用 **uv** 进行管理。
 sudo ./scripts/yiyin install
 ```
 
-安装完成后，可以在任意目录直接使用（需安装 Tmux）：
+安装 Tmux：
+
+``` bash
+sudo apt-get install tmux
+```
+
+安装完成后，可以在任意目录直接使用：
 
 ```bash
 yiyin run           # 启动机器人

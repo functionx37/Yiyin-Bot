@@ -44,16 +44,23 @@ Python包依赖使用 **uv** 进行管理。
 ## 功能列表
 [点击查看](assets/documents/help.json)
 
-## 数据同步  
-项目提供 `scripts/sync-data.sh`，可在 `.env.prod` 中配置默认远程，也可以用参数传递，需要 SSH 能登录。
+## 启动脚本
 
-请注意，脚本为镜像同步，目标端会被覆盖。
+首次安装全局命令：
 
 ```bash
-# 把本机推到远程
-./scripts/sync-data.sh push
-# 从远程拉取到本机
-./scripts/sync-data.sh pull
-# 只查看会同步哪些文件（不实际传输）
-./scripts/sync-data.sh diff
+sudo ./scripts/yiyin install
 ```
+
+安装完成后，可以在任意目录直接使用：
+
+```bash
+yiyin run           # 启动机器人
+yiyin stop          # 停止机器人
+yiyin status        # 查看机器人状态
+yiyin push          # 把本机推到远程
+yiyin pull          # 从远程拉取到本机
+yiyin diff          # 查看会同步哪些文件
+```
+
+请注意，脚本为镜像同步，目标端会被覆盖。可在 `.env.prod` 中配置默认远程，也可以用参数传递，需要 SSH 能登录。

@@ -128,8 +128,7 @@ mkdir -p "$NAPCAT_DIR"
 
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
   echo "tmux 会话已存在: $SESSION_NAME"
-  echo "可使用 'tmux attach -t $SESSION_NAME' 查看运行状态。"
-  exit 0
+  exec tmux attach-session -t "$SESSION_NAME"
 fi
 
 check_and_update_repo
@@ -137,10 +136,14 @@ check_and_update_repo
 printf -v bot_cmd 'cd %q && uv run bot.py' "$BOT_DIR"
 printf -v napcat_cmd 'cd %q && napcat' "$NAPCAT_DIR"
 
-tmux new-session -d -s "$SESSION_NAME" -n bot "$bot_cmd"
-tmux new-window -t "$SESSION_NAME:" -n napcat "$napcat_cmd"
+tmux new-session -d -s "$SESSION_NAME" -n main "$bot_cmd"
+tmux split-window -h -t "$SESSION_NAME:main" "$napcat_cmd"
+tmux select-layout -t "$SESSION_NAME:main" even-horizontal
+tmux select-pane -t "$SESSION_NAME:main.1"
 
 echo "已启动 tmux 会话: $SESSION_NAME"
-echo "  bot    -> $BOT_DIR"
-echo "  napcat -> $NAPCAT_DIR"
-echo "查看日志: tmux attach -t $SESSION_NAME"
+echo "  左侧 bot    -> $BOT_DIR"
+echo "  右侧 napcat -> $NAPCAT_DIR"
+echo "正在进入 tmux，会话退出请按 Ctrl+B D"
+
+exec tmux attach-session -t "$SESSION_NAME"

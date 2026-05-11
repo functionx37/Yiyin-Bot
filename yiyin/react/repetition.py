@@ -277,6 +277,8 @@ async def _should_handle_repetition(bot: Bot, event: GroupMessageEvent) -> bool:
         return False
     if not await _repetition_enabled(bot, event):
         return False
+    if getattr(event, "_yiyin_skip_repetition", False):
+        return False
 
     group_id = str(event.group_id)
     candidate = _group_candidate(group_id)

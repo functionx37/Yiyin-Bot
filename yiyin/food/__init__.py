@@ -855,6 +855,7 @@ async def handle_feast(
 
 async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
     """处理“吃什么”入口：普通消息与 `/吃什么` 命令兼容共用。"""
+    setattr(event, "_yiyin_skip_repetition", True)
     group_id = str(event.group_id)
     index = _load_index(group_id)
     if not index:

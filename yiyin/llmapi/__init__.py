@@ -595,6 +595,7 @@ async def generate_image_via_chat(
     payload: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": content}],
+        "modalities": ["text", "image"],
         "max_tokens": max_tokens,
         "stream": False,
     }
@@ -626,13 +627,18 @@ async def generate_image_via_chat(
             logger.warning("generate_image_via_chat choices 为空: {}", data)
             return None
 
-        msg_content = choices[0].get("message", {}).get("content")
+        first_choice = choices[0]
+        message = first_choice.get("message", {})
+        msg_content = message.get("content")
         results = _extract_images_from_content(msg_content)
         if not results:
             logger.warning(
-                "generate_image_via_chat 未在响应中找到图片: content_type={}, content={}",
+                "generate_image_via_chat 未在响应中找到图片: model={} finish_reason={} content_type={} message_keys={} content={}",
+                model,
+                first_choice.get("finish_reason"),
                 type(msg_content).__name__,
-                repr(msg_content)[:200] if msg_content is not None else None,
+                sorted(message.keys()),
+                repr(msg_content)[:500] if msg_content is not None else None,
             )
         return results
 

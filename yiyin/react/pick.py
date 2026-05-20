@@ -2,22 +2,79 @@
 选择回应（react 子模块）
 - 匹配以 # 开头且包含「还是」的多选一结构
 - 匹配以 # 开头的「句子1 + 词 + 不 + 相同词 + 句子2」结构
+- 支持从 assets/documents/pick_special.json 读取特判问答
 - 以最长相同前后缀作为词
 - 引用原消息后按概率回复
 """
 
 from __future__ import annotations
 
+import json
 import random
+from pathlib import Path
 
 from nonebot import on_message
 from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SPECIAL_RESPONSES_PATH = PROJECT_ROOT / "assets" / "documents" / "pick_special.json"
+
+_special_responses_cache: dict[str, str] | None = None
+
 
 def _not_from_bot(event: GroupMessageEvent) -> bool:
     """忽略机器人自己的消息。"""
     return str(event.self_id) != str(event.user_id)
+
+
+def _load_special_responses() -> dict[str, str]:
+    """加载 pick 特判问答。"""
+    global _special_responses_cache
+    if _special_responses_cache is not None:
+        return _special_responses_cache
+
+    if not SPECIAL_RESPONSES_PATH.exists():
+        _special_responses_cache = {}
+        return _special_responses_cache
+
+    try:
+        with open(SPECIAL_RESPONSES_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        _special_responses_cache = {}
+        return _special_responses_cache
+
+    responses: dict[str, str] = {}
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            question = item.get("Q")
+            answer = item.get("A")
+            if not isinstance(question, str) or not isinstance(answer, str):
+                continue
+
+            normalized_question = question.strip()
+            normalized_answer = answer.strip()
+            if normalized_question and normalized_answer:
+                responses[normalized_question] = normalized_answer
+
+    _special_responses_cache = responses
+    return _special_responses_cache
+
+
+def _get_special_reply(text: str) -> str | None:
+    """获取 #内容 命中的特判回复。"""
+    if not text.startswith("#"):
+        return None
+
+    content = text[1:].strip()
+    if not content:
+        return None
+
+    return _load_special_responses().get(content)
 
 
 def _extract_alternative_choices(text: str) -> list[str] | None:
@@ -77,6 +134,10 @@ def _pick_reply(sentence1: str, word: str, sentence2: str) -> str:
 
 def _build_pick_reply(text: str) -> str | None:
     """根据 pick 规则生成回复文本。"""
+    special_reply = _get_special_reply(text)
+    if special_reply is not None:
+        return special_reply
+
     choices = _extract_alternative_choices(text)
     if choices is not None:
         return random.choice(choices)

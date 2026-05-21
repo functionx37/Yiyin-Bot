@@ -2,6 +2,8 @@
 Yiyin-Bot 网页展示链接插件
 - 命令：/web
 - 功能：生成当日有效的群聊数据访问链接
+- 命令：/行动代号
+- 功能：发送行动代号页面链接
 """
 
 from __future__ import annotations
@@ -17,6 +19,10 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent
 
 def _timezone_name() -> str:
     return os.getenv("TOKEN_TIMEZONE", "Asia/Shanghai").strip() or "Asia/Shanghai"
+
+
+def _site_base_url() -> str:
+    return os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
 
 
 def _current_time() -> datetime:
@@ -47,11 +53,12 @@ def _expires_at(now: datetime | None = None) -> datetime:
 
 
 web_cmd = on_command("web", priority=10, block=True)
+codenames_cmd = on_command("行动代号", priority=10, block=True)
 
 
 @web_cmd.handle()
 async def handle_web(event: GroupMessageEvent):
-    site_base_url = os.getenv("SITE_BASE_URL", "").strip().rstrip("/")
+    site_base_url = _site_base_url()
     if not site_base_url:
         await web_cmd.finish("未配置 SITE_BASE_URL，无法生成网页链接。")
 
@@ -65,3 +72,12 @@ async def handle_web(event: GroupMessageEvent):
     await web_cmd.finish(
         f"群网页链接：\n{url}\n\n该链接将于 {expires_at}（{_timezone_name()}）失效。"
     )
+
+
+@codenames_cmd.handle()
+async def handle_codenames():
+    site_base_url = _site_base_url()
+    if not site_base_url:
+        await codenames_cmd.finish("未配置 SITE_BASE_URL，无法发送行动代号链接。")
+
+    await codenames_cmd.finish(f"{site_base_url}/codenames")

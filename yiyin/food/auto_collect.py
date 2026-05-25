@@ -14,8 +14,8 @@ from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
 
-from yiyin.food import add_food_from_image_url
-from yiyin.food.llm_recognition import recognize_food_from_image_bytes
+from yiyin.food import add_food_from_image_url, get_group_labels
+from yiyin.food.llm_recognition import recognize_food_with_labels_from_image_bytes
 from yiyin.toggle import is_feature_enabled_async
 
 # ==================== 配置 ====================
@@ -150,15 +150,21 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
     if not image_url or not image_bytes:
         return
 
-    rec_type, name = await recognize_food_from_image_bytes(
+    result = await recognize_food_with_labels_from_image_bytes(
         image_bytes,
         content_type,
+        label_pool=get_group_labels(group_id),
         log_prefix="自动食物收集",
     )
 
-    if rec_type == "FOOD":
-        result = await add_food_from_image_url(group_id, image_url, name)
-        if result:
+    if result.get("type") == "FOOD":
+        save_result = await add_food_from_image_url(
+            group_id,
+            image_url,
+            result.get("name") if isinstance(result.get("name"), str) else None,
+            tags=result.get("tags") if isinstance(result.get("tags"), list) else [],
+        )
+        if save_result:
             reply_seg = MessageSegment.reply(event.message_id)
             hint = "名称仅供参考，可使用 /补充名字 <id> <名字> 调整"
-            await bot.send(event, reply_seg + MessageSegment.text(f"{result}\n{hint}"))
+            await bot.send(event, reply_seg + MessageSegment.text(f"{save_result}\n{hint}"))

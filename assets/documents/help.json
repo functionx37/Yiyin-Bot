@@ -70,8 +70,8 @@
         "module": "食物图鉴",
         "function": [
             {
-                "command": "/收集食物 (名字) [图片]",
-                "description": "保存食物图片"
+                "command": "/收集食物 (名字) (#等级) (%（标签）) [图片]",
+                "description": "保存食物图片，并可在收集时设置等级和标签"
             },
             {
                 "command": "/删除食物 <ID/名字>",
@@ -86,8 +86,12 @@
                 "description": "为食物添加标签"
             },
             {
-                "command": "/吃 <ID/名字/标签>",
-                "description": "吃指定食物"
+                "command": "% <名字> -r <等级> -t （标签）",
+                "description": "引用食物消息后覆盖修改名字、等级和标签"
+            },
+            {
+                "command": "/吃 <ID/名字/标签/等级>",
+                "description": "按搜索结果随机吃一道相近食物"
             },
             {
                 "command": "/吃大餐 (数量)",

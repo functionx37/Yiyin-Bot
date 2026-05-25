@@ -1,11 +1,12 @@
 """
 NoneBot2 食物图鉴插件（按群隔离）
-- 命令：/收集食物 [名字] [图片] — 保存食物图片，支持引用图片，可选名字
+- 命令：/收集食物 (名字) (#夯/拉/NPC/人上人) (%（标签1）（标签2）) [图片]
 - 子模块 auto_collect：自动食物收集（常关，需 /启用 自动食物收集）
 - 命令：/删除食物 <id/名字> — 仅超级管理员，支持引用食物消息自动提取 ID
 - 命令：/补充名字 <id/名字> <新名字> — 支持引用食物消息后 /补充名字 新名字 自动提取 ID
 - 命令：/标记 <id/名字> <tag> — 支持引用食物消息后 /标记 标签 自动提取 ID
-- 命令：/吃 <id/名字/tag> — 支持引用食物消息自动提取 ID
+- 命令：引用食物消息后发送 % <名字> -r <夯/拉/NPC/人上人> -t （标签1）（标签2）
+- 命令：/吃 <id/名字/tag/rank> — 支持引用食物消息自动提取 ID
 - 命令：/隐藏 <id> — 将普通食物设为隐藏食物，支持引用食物消息自动提取 ID
 - 命令：/吃大餐 [数量] — 默认三道菜，最多十道
 - 触发：有人发『吃什么』时回复『是啊，吃什么』并随机一张图请你吃（单抽有概率触发隐藏食物）
@@ -16,19 +17,21 @@ import json
 import random
 import re
 import string
+from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Any
 
 import httpx
 from nonebot import on_command, on_keyword, on_message
+from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
+from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 from nonebot.log import logger
 from nonebot.matcher import Matcher
-from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
-from nonebot.adapters.onebot.v11.permission import GROUP_ADMIN, GROUP_OWNER
 
 from yiyin.food.llm_recognition import (
-    recognize_food_from_image_bytes,
+    recognize_food_with_labels_from_image_bytes,
     suggest_food_name_from_image_bytes,
 )
 
@@ -36,9 +39,31 @@ from yiyin.food.llm_recognition import (
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "food"
 
+RANK_ALIASES = {
+    "夯": "夯",
+    "夯爆了": "夯",
+    "人上人": "人上人",
+    "npc": "NPC",
+    "NPC": "NPC",
+    "拉": "拉",
+    "拉完了": "拉",
+}
+VALID_RANKS = {"夯", "人上人", "NPC", "拉"}
+MAX_EAT_CANDIDATES = 8
+EAT_SCORE_THRESHOLD = 0.42
+_COLLECT_RANK_RE = re.compile(r"(?:^|\s)#(夯爆了|夯|拉完了|拉|NPC|npc|人上人)(?=\s|$)")
+_COLLECT_TAGS_RE = re.compile(r"%(（[^）]+）(?:（[^）]+）)*)")
+_TAG_PARENS_RE = re.compile(r"（([^）]+)）")
+_REPLY_EDIT_RE = re.compile(
+    r"^\s*%(?P<body>.*?)(?:\s+-r\s+(?P<rank>\S+))?(?:\s+-t\s+(?P<tags>（[^）]+）(?:（[^）]+）)*))?\s*$"
+)
+_FOOD_ID_PREFIX_RE = re.compile(
+    r"食物ID[：:]\s*([A-Za-z0-9]+(?:\s*[、]\s*[A-Za-z0-9]+)*)"
+)
+_FOOD_LABEL_RE = re.compile(r"『[^』]*』[（(]([A-Za-z0-9]+)[）)]")
+
 
 def _get_group_dir(group_id: str) -> Path:
-    """获取群组数据目录（按群隔离）"""
     return DATA_DIR / group_id
 
 
@@ -54,8 +79,11 @@ def _get_hidden_prob_file(group_id: str) -> Path:
     return _get_group_dir(group_id) / "hidden_prob.json"
 
 
+def _get_labels_file(group_id: str) -> Path:
+    return _get_group_dir(group_id) / "label.json"
+
+
 def _load_hidden_prob(group_id: str) -> int:
-    """加载隐藏食物触发概率（1-100），默认 3"""
     f = _get_hidden_prob_file(group_id)
     if not f.exists():
         return 3
@@ -75,7 +103,6 @@ def _save_hidden_prob(group_id: str, prob: int) -> None:
 
 
 def _generate_short_id(existing_ids: set[str]) -> str:
-    """生成6位字母数字组合的唯一短ID"""
     chars = string.ascii_letters + string.digits
     while True:
         short_id = "".join(random.choices(chars, k=6))
@@ -84,12 +111,16 @@ def _generate_short_id(existing_ids: set[str]) -> str:
 
 
 def _load_index(group_id: str) -> dict[str, dict]:
-    """加载索引 {short_id: {"name": str | None}}，图片文件名为 {short_id}.png"""
     index_file = _get_index_file(group_id)
     if not index_file.exists():
         return {}
-    with open(index_file, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(index_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        logger.exception("读取食物索引失败")
+        return {}
 
 
 def _save_index(group_id: str, index: dict[str, dict]) -> None:
@@ -99,20 +130,199 @@ def _save_index(group_id: str, index: dict[str, dict]) -> None:
         json.dump(index, f, ensure_ascii=False, indent=2)
 
 
-def _add_to_index(group_id: str, name: str | None) -> str:
-    """向索引添加一条，返回 short_id。图片需保存为 images/{short_id}.png"""
+def _normalize_tag(tag: str | None) -> str | None:
+    if not isinstance(tag, str):
+        return None
+    cleaned = tag.strip()
+    return cleaned or None
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _get_tags(entry: dict) -> list[str]:
+    tags = entry.get("tags")
+    if not isinstance(tags, list):
+        return []
+    result: list[str] = []
+    for item in tags:
+        normalized = _normalize_tag(item)
+        if normalized:
+            result.append(normalized)
+    return _dedupe_keep_order(result)
+
+
+def _normalize_rank(rank: str | None) -> str | None:
+    if not isinstance(rank, str):
+        return None
+    cleaned = rank.strip()
+    if not cleaned:
+        return None
+    return RANK_ALIASES.get(cleaned)
+
+
+def _get_rank(entry: dict) -> str | None:
+    rank = _normalize_rank(entry.get("rank"))
+    return rank if rank in VALID_RANKS else None
+
+
+def _ensure_labels_initialized(group_id: str) -> list[str]:
+    labels_file = _get_labels_file(group_id)
+    if labels_file.exists():
+        return _load_labels(group_id)
     index = _load_index(group_id)
-    existing = set(index.keys())
-    short_id = _generate_short_id(existing)
-    index[short_id] = {"name": name}
-    _save_index(group_id, index)
-    return short_id
+    labels: list[str] = []
+    for entry in index.values():
+        if isinstance(entry, dict):
+            labels.extend(_get_tags(entry))
+    deduped = _dedupe_keep_order(labels)
+    _save_labels(group_id, deduped)
+    return deduped
+
+
+def _load_labels(group_id: str) -> list[str]:
+    labels_file = _get_labels_file(group_id)
+    if not labels_file.exists():
+        return _ensure_labels_initialized(group_id)
+    try:
+        with open(labels_file, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        labels = raw.get("labels") if isinstance(raw, dict) else []
+        if not isinstance(labels, list):
+            return []
+        result: list[str] = []
+        for item in labels:
+            normalized = _normalize_tag(item)
+            if normalized:
+                result.append(normalized)
+        return _dedupe_keep_order(result)
+    except Exception:
+        logger.exception("读取标签索引失败")
+        return []
+
+
+def _save_labels(group_id: str, labels: list[str]) -> None:
+    labels_file = _get_labels_file(group_id)
+    labels_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(labels_file, "w", encoding="utf-8") as f:
+        json.dump({"labels": _dedupe_keep_order(labels)}, f, ensure_ascii=False, indent=2)
+
+
+def _record_labels(group_id: str, labels: list[str]) -> None:
+    normalized = [tag for tag in (_normalize_tag(tag) for tag in labels) if tag]
+    if not normalized:
+        _ensure_labels_initialized(group_id)
+        return
+    existing = _ensure_labels_initialized(group_id)
+    merged = _dedupe_keep_order(existing + normalized)
+    if merged != existing:
+        _save_labels(group_id, merged)
+
+
+def _parse_tags_expr(expr: str | None) -> list[str]:
+    if not isinstance(expr, str) or not expr.strip():
+        return []
+    tags = [_normalize_tag(match.group(1)) for match in _TAG_PARENS_RE.finditer(expr)]
+    return _dedupe_keep_order([tag for tag in tags if tag])
+
+
+def _parse_collect_text(text: str) -> tuple[str | None, str | None, list[str], str | None]:
+    if not text:
+        return None, None, [], None
+    rest = text.strip()
+    tags: list[str] = []
+    rank: str | None = None
+
+    tag_match = _COLLECT_TAGS_RE.search(rest)
+    if tag_match:
+        tags = _parse_tags_expr(tag_match.group(1))
+        rest = (rest[: tag_match.start()] + " " + rest[tag_match.end() :]).strip()
+
+    rank_match = _COLLECT_RANK_RE.search(rest)
+    if rank_match:
+        rank = _normalize_rank(rank_match.group(1))
+        rest = (rest[: rank_match.start()] + " " + rest[rank_match.end() :]).strip()
+    elif "#" in rest:
+        hash_match = re.search(r"(?:^|\s)#(\S+)", rest)
+        if hash_match:
+            return None, None, [], "等级仅支持：夯 / 夯爆了 / 人上人 / NPC / 拉 / 拉完了"
+
+    name = rest.strip() or None
+    return name, rank, tags, None
+
+
+def _parse_reply_edit_text(text: str) -> tuple[str | None, str | None, list[str] | None, str | None]:
+    m = _REPLY_EDIT_RE.match(text)
+    if not m:
+        return None, None, None, "用法：引用食物消息后发送 % <名字> -r <等级> -t （标签1）（标签2）"
+
+    body = (m.group("body") or "").strip()
+    rank = _normalize_rank(m.group("rank"))
+    if m.group("rank") and not rank:
+        return None, None, None, "等级仅支持：夯 / 夯爆了 / 人上人 / NPC / 拉 / 拉完了"
+
+    tags_expr = m.group("tags")
+    tags = _parse_tags_expr(tags_expr) if tags_expr is not None else None
+    name = body or None
+    if name and name.startswith("-"):
+        return None, None, None, "名字请写在 % 后面，选项使用 -r / -t"
+    if not any([name, rank, tags is not None]):
+        return None, None, None, "请至少提供名字、-r 或 -t 其中一项"
+    return name, rank, tags, None
+
+
+def _write_food_entry(
+    group_id: str,
+    index: dict[str, dict],
+    food_id: str,
+    *,
+    name: str | None = None,
+    rank: str | None = None,
+    tags: list[str] | None = None,
+) -> None:
+    entry = index.setdefault(food_id, {})
+    if name is not None:
+        entry["name"] = name
+    if rank is not None:
+        entry["rank"] = rank
+    if tags is not None:
+        entry["tags"] = _dedupe_keep_order(
+            [tag for tag in (_normalize_tag(tag) for tag in tags) if tag]
+        )
+        _record_labels(group_id, entry["tags"])
+
+
+def get_group_labels(group_id: str) -> list[str]:
+    return _load_labels(group_id)
+
+
+def _format_food_label(short_id: str, name: str | None) -> str:
+    if name and name.strip():
+        return f"『{name.strip()}』（{short_id}）"
+    return f"『{short_id}』"
+
+
+def _format_rank_suffix(rank: str | None) -> str:
+    return f" #{rank}" if rank else ""
+
+
+def _format_tags_suffix(tags: list[str]) -> str:
+    if not tags:
+        return ""
+    return " %" + "".join(f"（{tag}）" for tag in tags)
 
 
 async def _extract_images(
     bot: Bot, event: GroupMessageEvent, args: Message
 ) -> list[MessageSegment]:
-    """从命令参数和引用消息中提取图片，支持多张图片（含引用）依次处理"""
     images: list[MessageSegment] = []
     for seg in args:
         if seg.type == "image":
@@ -144,15 +354,8 @@ async def _extract_images(
     return images
 
 
-# 从消息文本中解析食物 ID 的正则
-_FOOD_ID_PREFIX_RE = re.compile(r"食物ID[：:]\s*([A-Za-z0-9]+(?:\s*[、]\s*[A-Za-z0-9]+)*)")
-_FOOD_LABEL_RE = re.compile(r"『[^』]*』[（(]([A-Za-z0-9]+)[）)]")
-
-
 def _parse_food_ids_from_text(text: str) -> list[str]:
-    """从消息文本中解析食物 ID 列表。支持格式：食物ID：xxx、yyy；『name』（id）"""
     ids: list[str] = []
-    # 1. 食物ID：Ab3x9K 或 食物ID：Ab3x9K、Bc4y2L
     m = _FOOD_ID_PREFIX_RE.search(text)
     if m:
         part = m.group(1)
@@ -160,7 +363,6 @@ def _parse_food_ids_from_text(text: str) -> list[str]:
             sid = sid.strip()
             if sid and sid not in ids:
                 ids.append(sid)
-    # 2. 『name』（id）格式
     for m in _FOOD_LABEL_RE.finditer(text):
         sid = m.group(1).strip()
         if sid and sid not in ids:
@@ -168,10 +370,7 @@ def _parse_food_ids_from_text(text: str) -> list[str]:
     return ids
 
 
-async def _extract_food_ids_from_reply(
-    bot: Bot, event: GroupMessageEvent
-) -> list[str]:
-    """从引用的消息中提取食物 ID（一般为机器人发的食物相关消息）。无引用或解析失败返回空列表。"""
+async def _extract_food_ids_from_reply(bot: Bot, event: GroupMessageEvent) -> list[str]:
     if not event.reply:
         return []
     try:
@@ -193,7 +392,6 @@ async def _extract_food_ids_from_reply(
 
 
 def delete_food(group_id: str, food_id: str) -> bool:
-    """删除指定食物记录，供其他插件调用。成功返回 True，不存在返回 False。"""
     index = _load_index(group_id)
     if food_id not in index:
         return False
@@ -207,30 +405,13 @@ def delete_food(group_id: str, food_id: str) -> bool:
     return True
 
 
-def _format_food_label(short_id: str, name: str | None) -> str:
-    """有名字：『name』（id）；无名字：『id』"""
-    if name and name.strip():
-        return f"『{name.strip()}』（{short_id}）"
-    return f"『{short_id}』"
-
-
-def _get_tags(entry: dict) -> list[str]:
-    """获取食物的标签列表，兼容旧数据"""
-    tags = entry.get("tags")
-    if isinstance(tags, list):
-        return [t for t in tags if isinstance(t, str) and t.strip()]
-    return []
-
-
 def _has_hidden_been_selected(entry: dict) -> bool:
-    """隐藏食物是否已在当前轮次中被随机过，兼容旧数据。"""
     return bool(entry.get("hidden_selected"))
 
 
 def _get_hidden_food_ids(
     index: dict[str, dict], *, only_unrandomed: bool = False
 ) -> list[str]:
-    """获取隐藏食物 ID；可选仅返回当前轮次尚未随机过的项。"""
     result: list[str] = []
     for sid, entry in index.items():
         if not entry.get("hidden"):
@@ -242,7 +423,6 @@ def _get_hidden_food_ids(
 
 
 def _clear_hidden_selected_marks(index: dict[str, dict]) -> bool:
-    """清除所有隐藏食物的已随机标记。"""
     changed = False
     for entry in index.values():
         if not entry.get("hidden"):
@@ -254,7 +434,6 @@ def _clear_hidden_selected_marks(index: dict[str, dict]) -> bool:
 
 
 def _pick_hidden_food_for_random(index: dict[str, dict]) -> tuple[str | None, bool]:
-    """按轮次抽取隐藏食物，并在抽中后写入已随机标记。"""
     hidden_ids = _get_hidden_food_ids(index)
     if not hidden_ids:
         return None, False
@@ -276,25 +455,14 @@ def _pick_hidden_food_for_random(index: dict[str, dict]) -> tuple[str | None, bo
 def _resolve_id_or_name(
     group_id: str, id_or_name: str, *, allow_dup: bool = False
 ) -> tuple[list[str] | None, str | None]:
-    """
-    根据 id 或名字解析出对应的食物 id 列表。
-    - 若 id_or_name 是 index 中的 key，返回 ([id], None)
-    - 若按名字匹配到唯一一条，返回 ([id], None)
-    - 若按名字匹配到多条且 allow_dup=True，返回 (ids, None)
-    - 若按名字匹配到多条且 allow_dup=False，返回 (None, 重名提示消息)
-    - 若未找到，返回 (None, 不存在提示)
-    """
     index = _load_index(group_id)
     if not id_or_name or not id_or_name.strip():
         return None, "请输入食物ID或名字"
 
     key = id_or_name.strip()
-
-    # 1. 先按 id 查找
     if key in index:
         return [key], None
 
-    # 2. 按名字查找
     matched: list[str] = []
     for sid, entry in index.items():
         name = entry.get("name")
@@ -303,66 +471,15 @@ def _resolve_id_or_name(
 
     if not matched:
         return None, f"未找到名为『{key}』或ID为『{key}』的食物"
-
     if len(matched) == 1:
         return matched, None
-
-    # 重名
     if allow_dup:
         return matched, None
     ids_text = "\n".join(matched)
     return None, f"『{key}』对应的记录有：\n{ids_text}\n请使用id操作。"
 
 
-def _get_foods_by_tag(group_id: str, tag: str) -> list[str]:
-    """获取拥有指定标签的食物 id 列表（不含隐藏食物）"""
-    index = _load_index(group_id)
-    result: list[str] = []
-    tag_clean = tag.strip() if tag else ""
-    if not tag_clean:
-        return result
-    for sid, entry in index.items():
-        if entry.get("hidden"):
-            continue
-        if tag_clean in _get_tags(entry):
-            result.append(sid)
-    return result
-
-
-async def add_food_from_image_url(
-    group_id: str, image_url: str, name: str | None
-) -> str | None:
-    """从图片 URL 保存食物到图鉴，供其他插件调用。成功返回提示消息，失败返回 None。"""
-    try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-            resp = await client.get(image_url)
-            resp.raise_for_status()
-            content = resp.content
-    except Exception:
-        logger.exception(f"下载食物图片失败: {image_url}")
-        return None
-
-    index = _load_index(group_id)
-    existing_ids = set(index.keys())
-    short_id = _generate_short_id(existing_ids)
-    images_dir = _get_images_dir(group_id)
-    images_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        filepath = images_dir / f"{short_id}.png"
-        filepath.write_bytes(content)
-        index[short_id] = {"name": name}
-        _save_index(group_id, index)
-    except Exception:
-        logger.exception("保存食物文件失败")
-        filepath.unlink(missing_ok=True)
-        return None
-
-    name_hint = f"『{name}』" if name else "（未填名字，可用 /补充名字 <id> <名字> 补充）"
-    return f"已保存 1 张食物图✓ {name_hint}\n食物ID：{short_id}"
-
-
 def _extract_image_urls_from_segments(images: list[MessageSegment]) -> list[str]:
-    """从图片消息段中提取可下载 URL。"""
     urls: list[str] = []
     for seg in images:
         if seg.type != "image":
@@ -376,7 +493,6 @@ def _extract_image_urls_from_segments(images: list[MessageSegment]) -> list[str]
 async def _download_food_images(
     group_id: str, image_urls: list[str]
 ) -> list[tuple[str, bytes, str | None]] | None:
-    """下载待收集图片，任一失败则返回 None。"""
     index = _load_index(group_id)
     existing_ids = set(index.keys())
     downloaded: list[tuple[str, bytes, str | None]] = []
@@ -387,26 +503,28 @@ async def _download_food_images(
                 resp.raise_for_status()
                 short_id = _generate_short_id(existing_ids)
                 existing_ids.add(short_id)
-                downloaded.append((short_id, resp.content, resp.headers.get("content-type")))
+                downloaded.append(
+                    (short_id, resp.content, resp.headers.get("content-type"))
+                )
             except Exception:
                 logger.exception(f"下载食物图片失败: {url}")
                 return None
     return downloaded
 
 
-async def _resolve_food_names(
+async def _resolve_food_metadata(
     downloaded: list[tuple[str, bytes, str | None]],
     name: str | None,
     *,
     name_only_with_llm: bool,
     log_prefix: str,
-) -> dict[str, str | None]:
-    """为下载后的图片解析名称。"""
-    resolved_names: dict[str, str | None] = {}
+    label_pool: list[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    resolved: dict[str, dict[str, Any]] = {}
     if name:
         for short_id, _, _ in downloaded:
-            resolved_names[short_id] = name
-        return resolved_names
+            resolved[short_id] = {"name": name, "tags": []}
+        return resolved
 
     if name_only_with_llm:
         name_results = await asyncio.gather(
@@ -419,45 +537,105 @@ async def _resolve_food_names(
                 for _, content, content_type in downloaded
             ]
         )
-        for (short_id, _, _), auto_name in zip(downloaded, name_results):
-            resolved_names[short_id] = auto_name
-        return resolved_names
+        label_results: list[dict[str, object]]
+        if label_pool:
+            label_results = await asyncio.gather(
+                *[
+                    recognize_food_with_labels_from_image_bytes(
+                        content,
+                        content_type,
+                        label_pool=label_pool,
+                        log_prefix=log_prefix,
+                    )
+                    for _, content, content_type in downloaded
+                ]
+            )
+        else:
+            label_results = [{"type": "OTHER", "tags": []} for _ in downloaded]
+        for (short_id, _, _), auto_name, label_result in zip(
+            downloaded, name_results, label_results
+        ):
+            resolved[short_id] = {
+                "name": auto_name,
+                "tags": label_result.get("tags", []) if isinstance(label_result, dict) else [],
+            }
+        return resolved
 
-    name_results = await asyncio.gather(
+    recog_results = await asyncio.gather(
         *[
-            recognize_food_from_image_bytes(
+            recognize_food_with_labels_from_image_bytes(
                 content,
                 content_type,
+                label_pool=label_pool or [],
                 log_prefix=log_prefix,
             )
             for _, content, content_type in downloaded
         ]
     )
-    for (short_id, _, _), (rec_type, auto_name) in zip(downloaded, name_results):
-        resolved_names[short_id] = auto_name if rec_type == "FOOD" else None
-    return resolved_names
+    for (short_id, _, _), result in zip(downloaded, recog_results):
+        resolved[short_id] = {
+            "name": result.get("name") if result.get("type") == "FOOD" else None,
+            "tags": _dedupe_keep_order(
+                [
+                    tag
+                    for tag in (
+                        _normalize_tag(tag) for tag in result.get("tags", []) or []
+                    )
+                    if tag
+                ]
+            ),
+        }
+    return resolved
 
 
 def _build_collect_food_success_message(
     downloaded: list[tuple[str, bytes, str | None]],
-    resolved_names: dict[str, str | None],
-    name: str | None,
+    resolved: dict[str, dict[str, Any]],
+    *,
+    manual_name: str | None,
+    manual_rank: str | None,
+    manual_tags: list[str],
+    auto_tag_hint: bool,
 ) -> str:
-    """构造成功收集食物的提示文本。"""
     id_str = "、".join(sid for sid, _, _ in downloaded)
-    if name:
-        return f"已保存 {len(downloaded)} 张食物图✓ 『{name}』\n食物ID：{id_str}"
-
-    auto_named_count = sum(1 for n in resolved_names.values() if n)
-    labels_text = "\n".join(
-        _format_food_label(short_id, resolved_names.get(short_id))
-        for short_id, _, _ in downloaded
-    )
-    if auto_named_count:
-        name_hint = f"（已自动命名 {auto_named_count} 张，名称仅供参考，可用 /补充名字 <id> <名字> 调整）"
+    lines: list[str] = []
+    if manual_name:
+        header = f"已保存 {len(downloaded)} 张食物图✓ 『{manual_name}』"
+        header += _format_rank_suffix(manual_rank)
+        header += _format_tags_suffix(manual_tags)
+        lines.append(header)
+        if auto_tag_hint and manual_tags:
+            lines.append(f"已自动标记标签：{'、'.join(manual_tags)}")
     else:
-        name_hint = "（未指定名字，且自动命名失败，可用 /补充名字 <id> <名字> 补充）"
-    return f"已保存 {len(downloaded)} 张食物图✓ {name_hint}\n{labels_text}\n食物ID：{id_str}"
+        auto_named_count = sum(1 for item in resolved.values() if item.get("name"))
+        if auto_named_count:
+            lines.append(
+                f"已保存 {len(downloaded)} 张食物图✓ （已自动命名 {auto_named_count} 张，名称仅供参考，可用 /补充名字 <id> <名字> 调整）"
+            )
+        else:
+            lines.append(
+                f"已保存 {len(downloaded)} 张食物图✓ （未指定名字，且自动命名失败，可用 /补充名字 <id> <名字> 补充）"
+            )
+        for short_id, _, _ in downloaded:
+            item = resolved.get(short_id, {})
+            item_name = item.get("name")
+            item_tags = item.get("tags") or []
+            label_line = _format_food_label(short_id, item_name)
+            if item_tags:
+                label_line += _format_tags_suffix(item_tags)
+            lines.append(label_line)
+        if auto_tag_hint:
+            auto_tags = _dedupe_keep_order(
+                [
+                    tag
+                    for short_id, _, _ in downloaded
+                    for tag in resolved.get(short_id, {}).get("tags", [])
+                ]
+            )
+            if auto_tags:
+                lines.append(f"已自动标记标签：{'、'.join(auto_tags)}")
+    lines.append(f"食物ID：{id_str}")
+    return "\n".join(lines)
 
 
 async def save_foods_from_image_urls(
@@ -465,22 +643,31 @@ async def save_foods_from_image_urls(
     image_urls: list[str],
     name: str | None = None,
     *,
+    rank: str | None = None,
+    tags: list[str] | None = None,
     name_only_with_llm: bool = False,
     log_prefix: str = "收集食物自动命名",
+    auto_tag_with_llm: bool = False,
 ) -> str | None:
-    """从多个图片 URL 收集食物；任一下载或保存失败时返回 None。"""
     if not image_urls:
         return None
+
+    normalized_rank = _normalize_rank(rank)
+    normalized_tags = _dedupe_keep_order(
+        [tag for tag in (_normalize_tag(tag) for tag in (tags or [])) if tag]
+    )
 
     downloaded = await _download_food_images(group_id, image_urls)
     if not downloaded:
         return None
 
-    resolved_names = await _resolve_food_names(
+    label_pool = _load_labels(group_id) if auto_tag_with_llm else []
+    resolved = await _resolve_food_metadata(
         downloaded,
         name,
         name_only_with_llm=name_only_with_llm,
         log_prefix=log_prefix,
+        label_pool=label_pool,
     )
 
     index = _load_index(group_id)
@@ -488,7 +675,18 @@ async def save_foods_from_image_urls(
     images_dir.mkdir(parents=True, exist_ok=True)
     try:
         for short_id, content, _ in downloaded:
-            index[short_id] = {"name": resolved_names.get(short_id)}
+            item = resolved.get(short_id, {})
+            entry_name = name if name is not None else item.get("name")
+            entry_tags = normalized_tags if tags is not None else item.get("tags", [])
+            index[short_id] = {}
+            _write_food_entry(
+                group_id,
+                index,
+                short_id,
+                name=entry_name,
+                rank=normalized_rank,
+                tags=entry_tags,
+            )
             filepath = images_dir / f"{short_id}.png"
             filepath.write_bytes(content)
         _save_index(group_id, index)
@@ -496,20 +694,43 @@ async def save_foods_from_image_urls(
         logger.exception("保存食物文件失败，回滚")
         for short_id, _, _ in downloaded:
             (images_dir / f"{short_id}.png").unlink(missing_ok=True)
+            index.pop(short_id, None)
         return None
 
-    return _build_collect_food_success_message(downloaded, resolved_names, name)
+    return _build_collect_food_success_message(
+        downloaded,
+        resolved,
+        manual_name=name,
+        manual_rank=normalized_rank,
+        manual_tags=normalized_tags,
+        auto_tag_hint=auto_tag_with_llm,
+    )
 
 
-# ==================== 注册命令 ====================
-collect_food_cmd = on_command("收集食物", priority=10, block=True)
+async def add_food_from_image_url(
+    group_id: str,
+    image_url: str,
+    name: str | None,
+    *,
+    rank: str | None = None,
+    tags: list[str] | None = None,
+) -> str | None:
+    result = await save_foods_from_image_urls(
+        group_id,
+        [image_url],
+        name=name,
+        rank=rank,
+        tags=tags,
+        log_prefix="自动食物收集",
+        auto_tag_with_llm=tags is not None,
+    )
+    return result
 
 
 def _collect_food_image_first_rule(event: GroupMessageEvent) -> bool:
-    """仅当消息首段为非文本（如图片）且包含收集食物命令时触发，用于支持『图片在上指令在下』"""
     msg = event.get_message()
     if not msg or msg[0].is_text():
-        return False  # 首段是文本时由 on_command 处理
+        return False
     text = msg.extract_plain_text().strip()
     if not text:
         return False
@@ -525,14 +746,17 @@ def _collect_food_image_first_rule(event: GroupMessageEvent) -> bool:
     return True
 
 
+def _reply_percent_rule(event: GroupMessageEvent) -> bool:
+    text = event.get_message().extract_plain_text().strip()
+    return bool(event.reply and text.startswith("%"))
+
+
+collect_food_cmd = on_command("收集食物", priority=10, block=True)
 collect_food_image_first_cmd = on_message(
     _collect_food_image_first_rule, priority=9, block=True
 )
-
-
-delete_food_cmd = on_command(
-    "删除食物", priority=10, block=True, permission=SUPERUSER
-)
+reply_percent_cmd = on_message(_reply_percent_rule, priority=10, block=True)
+delete_food_cmd = on_command("删除食物", priority=10, block=True, permission=SUPERUSER)
 supplement_name_cmd = on_command("补充名字", priority=10, block=True)
 hidden_food_cmd = on_command(
     "隐藏", priority=10, block=True, permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER
@@ -540,23 +764,23 @@ hidden_food_cmd = on_command(
 feast_cmd = on_command("吃大餐", priority=10, block=True)
 eat_cmd = on_command("吃", priority=10, block=True)
 tag_food_cmd = on_command("标记", priority=10, block=True)
-
 what_to_eat_matcher = on_keyword({"吃什么"}, priority=50, block=False)
 
 
-# ==================== 命令处理 ====================
 async def _do_collect_food(
     bot: Bot,
     event: GroupMessageEvent,
+    *,
     name: str | None,
+    rank: str | None,
+    tags: list[str],
     args: Message,
     matcher: Matcher,
 ) -> None:
-    """收集食物的核心逻辑，供 on_command 与 on_message（图片在上）共用"""
     images = await _extract_images(bot, event, args)
     if not images:
         await matcher.finish(
-            "请在命令中附带图片或引用含图片的消息，例如：/收集食物 [名字] [图片]"
+            "请在命令中附带图片或引用含图片的消息，例如：/收集食物 (名字) [图片]"
         )
 
     group_id = str(event.group_id)
@@ -568,6 +792,8 @@ async def _do_collect_food(
         group_id,
         image_urls,
         name,
+        rank=rank,
+        tags=tags,
         log_prefix="手动收集食物自动命名",
     )
     if not result:
@@ -579,28 +805,81 @@ async def _do_collect_food(
 async def handle_collect_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /收集食物 [名字] [图片]：全部下载成功才写入，任一出错则回滚"""
     text = args.extract_plain_text().strip()
-    name = text if text else None
-    await _do_collect_food(bot, event, name, args, collect_food_cmd)
+    name, rank, tags, err = _parse_collect_text(text)
+    if err:
+        await collect_food_cmd.finish(err)
+    await _do_collect_food(
+        bot, event, name=name, rank=rank, tags=tags, args=args, matcher=collect_food_cmd
+    )
 
 
 @collect_food_image_first_cmd.handle()
 async def handle_collect_food_image_first(bot: Bot, event: GroupMessageEvent):
-    """处理『图片在上、指令在下』的 /收集食物"""
     msg = event.get_message()
     text = msg.extract_plain_text().strip()
     m = re.search(r"[/.\!！]收集食物\s*(.*)", text)
-    name_part = m.group(1).strip() if m and m.group(1) else ""
-    name = name_part if name_part else None
-    await _do_collect_food(bot, event, name, msg, collect_food_image_first_cmd)
+    collect_text = m.group(1).strip() if m and m.group(1) else ""
+    name, rank, tags, err = _parse_collect_text(collect_text)
+    if err:
+        await collect_food_image_first_cmd.finish(err)
+    await _do_collect_food(
+        bot,
+        event,
+        name=name,
+        rank=rank,
+        tags=tags,
+        args=msg,
+        matcher=collect_food_image_first_cmd,
+    )
+
+
+@reply_percent_cmd.handle()
+async def handle_reply_percent(
+    bot: Bot, event: GroupMessageEvent
+):
+    reply_ids = await _extract_food_ids_from_reply(bot, event)
+    if len(reply_ids) != 1:
+        await reply_percent_cmd.finish("请引用一条只包含一个食物 ID 的食物消息后再使用 %")
+
+    text = event.get_message().extract_plain_text().strip()
+    name, rank, tags, err = _parse_reply_edit_text(text)
+    if err:
+        await reply_percent_cmd.finish(err)
+
+    group_id = str(event.group_id)
+    food_id = reply_ids[0]
+    index = _load_index(group_id)
+    if food_id not in index:
+        await reply_percent_cmd.finish(f"食物ID『{food_id}』不存在")
+
+    _write_food_entry(
+        group_id,
+        index,
+        food_id,
+        name=name if name is not None else None,
+        rank=rank if rank is not None else None,
+        tags=tags if tags is not None else None,
+    )
+    _save_index(group_id, index)
+
+    entry = index[food_id]
+    parts: list[str] = [f"已更新食物（ID：{food_id}）"]
+    if name is not None:
+        parts.append(f"名字：『{entry.get('name') or food_id}』")
+    if rank is not None:
+        parts.append(f"等级：{_get_rank(entry)}")
+    if tags is not None:
+        parts.append(
+            "标签：" + ("、".join(_get_tags(entry)) if _get_tags(entry) else "（空）")
+        )
+    await reply_percent_cmd.finish("，".join(parts) + "✓")
 
 
 @delete_food_cmd.handle()
 async def handle_delete_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /删除食物 <id/名字>（仅超级管理员），支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
     if not text and event.reply:
         reply_ids = await _extract_food_ids_from_reply(bot, event)
@@ -632,7 +911,6 @@ async def handle_delete_food(
 async def handle_supplement_name(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /补充名字 <id/名字> <新名字>，支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
     parts = text.split(maxsplit=1)
     id_or_name: str | None = None
@@ -640,7 +918,6 @@ async def handle_supplement_name(
     if len(parts) >= 2:
         id_or_name, new_name = parts[0].strip(), parts[1].strip()
     elif len(parts) == 1 and event.reply:
-        # 引用消息 + 仅一个参数 → 从引用提取 ID，参数作为新名字
         reply_ids = await _extract_food_ids_from_reply(bot, event)
         if len(reply_ids) == 1:
             id_or_name, new_name = reply_ids[0], parts[0].strip()
@@ -656,25 +933,24 @@ async def handle_supplement_name(
 
     food_id = ids[0]
     index = _load_index(group_id)
-    index[food_id]["name"] = new_name
+    _write_food_entry(group_id, index, food_id, name=new_name)
     _save_index(group_id, index)
-    await supplement_name_cmd.finish(f"已为食物（ID：{food_id}）补充名字『{new_name}』✓")
+    await supplement_name_cmd.finish(
+        f"已为食物（ID：{food_id}）补充名字『{new_name}』✓"
+    )
 
 
 @hidden_food_cmd.handle()
 async def handle_hidden_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /隐藏 <id>：将普通食物设为隐藏食物，支持引用食物消息自动提取 ID"""
     food_id = args.extract_plain_text().strip()
     if not food_id and event.reply:
         reply_ids = await _extract_food_ids_from_reply(bot, event)
         if len(reply_ids) == 1:
             food_id = reply_ids[0]
     if not food_id:
-        await hidden_food_cmd.finish(
-            "用法：/隐藏 <食物ID>，或引用食物消息后直接发送 /隐藏"
-        )
+        await hidden_food_cmd.finish("用法：/隐藏 <食物ID>，或引用食物消息后直接发送 /隐藏")
 
     group_id = str(event.group_id)
     index = _load_index(group_id)
@@ -690,7 +966,6 @@ async def handle_hidden_food(
 async def handle_tag_food(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /标记 <id/名字> <tag>，支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
     parts = text.split(maxsplit=1)
     id_or_name: str | None = None
@@ -698,10 +973,10 @@ async def handle_tag_food(
     if len(parts) >= 2:
         id_or_name, tag = parts[0].strip(), parts[1].strip()
     elif len(parts) == 1 and event.reply:
-        # 引用消息 + 仅一个参数 → 从引用提取 ID，参数作为标签
         reply_ids = await _extract_food_ids_from_reply(bot, event)
         if len(reply_ids) == 1:
             id_or_name, tag = reply_ids[0], parts[0].strip()
+    tag = _normalize_tag(tag)
     if not id_or_name or not tag:
         await tag_food_cmd.finish(
             "用法：/标记 <食物ID或名字> <标签>，或引用食物消息后发送 /标记 标签"
@@ -718,100 +993,109 @@ async def handle_tag_food(
     tags = _get_tags(entry)
     if tag not in tags:
         tags.append(tag)
-        entry["tags"] = tags
+        _write_food_entry(group_id, index, food_id, tags=tags)
         _save_index(group_id, index)
     await tag_food_cmd.finish(f"已为食物（ID：{food_id}）添加标签『{tag}』✓")
+
+
+def _normalize_search_text(text: str) -> str:
+    cleaned = text.strip().casefold()
+    cleaned = cleaned.replace("（", "(").replace("）", ")")
+    cleaned = re.sub(r"\s+", "", cleaned)
+    mapped_rank = _normalize_rank(text.strip())
+    if mapped_rank:
+        return mapped_rank.casefold()
+    return cleaned
+
+
+def _score_field(query: str, field: str) -> float:
+    if not query or not field:
+        return 0.0
+    if query == field:
+        return 1.0
+    if field.startswith(query):
+        return 0.88
+    if query in field:
+        return 0.78
+    return SequenceMatcher(None, query, field).ratio()
+
+
+def _search_food_candidates(
+    index: dict[str, dict], query: str
+) -> list[str]:
+    normalized_query = _normalize_search_text(query)
+    scored: list[tuple[float, str]] = []
+    for sid, entry in index.items():
+        if entry.get("hidden"):
+            continue
+        best = 0.0
+        id_score = _score_field(normalized_query, _normalize_search_text(sid)) * 0.7
+        best = max(best, id_score)
+        name = entry.get("name")
+        if isinstance(name, str) and name.strip():
+            best = max(best, _score_field(normalized_query, _normalize_search_text(name)) * 1.0)
+        rank = _get_rank(entry)
+        if rank:
+            best = max(best, _score_field(normalized_query, _normalize_search_text(rank)) * 0.82)
+        for tag in _get_tags(entry):
+            best = max(best, _score_field(normalized_query, _normalize_search_text(tag)) * 0.9)
+        if best >= EAT_SCORE_THRESHOLD:
+            scored.append((best, sid))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [sid for _, sid in scored[:MAX_EAT_CANDIDATES]]
+
+
+def _build_food_message(group_id: str, food_id: str, index: dict[str, dict]) -> Message | str:
+    entry = index[food_id]
+    name = entry.get("name") or None
+    label = _format_food_label(food_id, name)
+    rank = _get_rank(entry)
+    tags = _get_tags(entry)
+    caption = f"请你吃{label}"
+    if rank:
+        caption += f" #{rank}"
+    if tags:
+        caption += "\n标签：" + "、".join(tags)
+    fn = entry.get("filename") or f"{food_id}.png"
+    filepath = _get_images_dir(group_id) / fn
+    if not filepath.exists():
+        return f"食物图片不存在（ID：{food_id}）"
+    return MessageSegment.text(caption + "\n") + MessageSegment.image(filepath.read_bytes())
 
 
 @eat_cmd.handle()
 async def handle_eat(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /吃 <id/名字/tag>：支持引用食物消息自动提取 ID"""
     text = args.extract_plain_text().strip()
     if not text and event.reply:
         reply_ids = await _extract_food_ids_from_reply(bot, event)
-        if len(reply_ids) == 1:
+        if reply_ids:
             text = reply_ids[0]
-        elif len(reply_ids) > 1:
-            # 吃大餐等多条食物消息，取第一条
-            text = reply_ids[0]
-    # 兼容 `/吃什么` 被解析成 `/吃 什么` 的情况，直接走“吃什么”逻辑。
     if text == "什么":
         await _handle_what_to_eat(bot, event)
         await eat_cmd.finish()
     if not text:
-        await eat_cmd.finish(
-            "用法：/吃 <食物ID/名字/标签>，或引用食物消息后直接发送 /吃"
-        )
+        await eat_cmd.finish("用法：/吃 <食物ID/名字/标签/等级>，或引用食物消息后直接发送 /吃")
 
     group_id = str(event.group_id)
     index = _load_index(group_id)
     if not index:
-        await eat_cmd.finish(
-            "本群还没有收集任何食物，使用 /收集食物 [名字] [图片] 来添加吧"
-        )
+        await eat_cmd.finish("本群还没有收集任何食物，使用 /收集食物 [名字] [图片] 来添加吧")
 
-    # 1. 优先按 tag 判断：若存在该标签的食物，则随机吃一条
-    tag_ids = _get_foods_by_tag(group_id, text)
-    if tag_ids:
-        short_id = random.choice(tag_ids)
-        entry = index[short_id]
-        name = entry.get("name") or None
-        label = _format_food_label(short_id, name)
-        fn = entry.get("filename") or f"{short_id}.png"
-        filepath = _get_images_dir(group_id) / fn
-        if filepath.exists():
-            msg = MessageSegment.text(f"请你吃{label}\n") + MessageSegment.image(
-                filepath.read_bytes()
-            )
-            await eat_cmd.finish(msg)
-        await eat_cmd.finish(f"食物图片不存在（ID：{short_id}）")
+    candidates = _search_food_candidates(index, text)
+    if not candidates:
+        await eat_cmd.finish(f"未找到和『{text}』相近的食物")
 
-    # 2. 按 id/名字 查找，重名则都吃
-    ids, err = _resolve_id_or_name(group_id, text, allow_dup=True)
-    if err:
-        await eat_cmd.finish(err)
-
-    # 过滤掉隐藏食物（吃大餐逻辑也不吃隐藏的，这里保持一致）
-    ids = [i for i in ids if not index.get(i, {}).get("hidden")]
-
-    if not ids:
-        await eat_cmd.finish("未找到可吃的食物")
-
-    images_dir = _get_images_dir(group_id)
-    parts: list[MessageSegment] = []
-    if len(ids) == 1:
-        short_id = ids[0]
-        entry = index[short_id]
-        name = entry.get("name") or None
-        label = _format_food_label(short_id, name)
-        fn = entry.get("filename") or f"{short_id}.png"
-        filepath = images_dir / fn
-        if filepath.exists():
-            msg = MessageSegment.text(f"请你吃{label}\n") + MessageSegment.image(
-                filepath.read_bytes()
-            )
-            await eat_cmd.finish(msg)
-        await eat_cmd.finish(f"食物图片不存在（ID：{short_id}）")
-
-    for i, short_id in enumerate(ids, 1):
-        entry = index[short_id]
-        name = entry.get("name") or None
-        label = _format_food_label(short_id, name)
-        parts.append(MessageSegment.text(f"第{i}道：{label}\n"))
-        fn = entry.get("filename") or f"{short_id}.png"
-        filepath = images_dir / fn
-        if filepath.exists():
-            parts.append(MessageSegment.image(filepath.read_bytes()))
-    await eat_cmd.finish(Message(parts))
+    chosen_id = random.choice(candidates)
+    msg = _build_food_message(group_id, chosen_id, index)
+    await eat_cmd.finish(msg)
 
 
 @feast_cmd.handle()
 async def handle_feast(
     bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
 ):
-    """处理 /吃大餐 [数量]：第一道菜：name（id）【图片】... 默认3道，最多10道"""
     group_id = str(event.group_id)
     text = args.extract_plain_text().strip()
     try:
@@ -854,29 +1138,25 @@ async def handle_feast(
 
 
 async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
-    """处理“吃什么”入口：普通消息与 `/吃什么` 命令兼容共用。"""
     setattr(event, "_yiyin_skip_repetition", True)
     group_id = str(event.group_id)
     index = _load_index(group_id)
     if not index:
         return
 
-    # 分离普通食物与隐藏食物
     normal_ids = [sid for sid, e in index.items() if not e.get("hidden")]
     hidden_ids = _get_hidden_food_ids(index)
 
-    # 若有隐藏食物，按概率判定是否触发
     triggered_hidden = False
     if hidden_ids:
         prob = _load_hidden_prob(group_id)
         if random.randint(1, 100) <= prob:
             triggered_hidden = True
-            _save_hidden_prob(group_id, 3)  # 抽中后概率重置为 3%
+            _save_hidden_prob(group_id, 3)
         else:
-            _save_hidden_prob(group_id, min(100, prob + 1))  # 未中则 +1%
+            _save_hidden_prob(group_id, min(100, prob + 1))
 
     if triggered_hidden and hidden_ids:
-        # 从本轮尚未抽中过的隐藏食物中抽取；若已全部抽过则清空标记后重开一轮
         short_id, index_changed = _pick_hidden_food_for_random(index)
         if not short_id:
             return
@@ -892,7 +1172,11 @@ async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
 
         await bot.send(event, "是啊，吃什么")
         user_id = event.get_user_id()
-        text_msg = MessageSegment.text("恭喜") + MessageSegment.at(user_id) + MessageSegment.text(f"，请您享用{food_name}：")
+        text_msg = (
+            MessageSegment.text("恭喜")
+            + MessageSegment.at(user_id)
+            + MessageSegment.text(f"，请您享用{food_name}：")
+        )
         await bot.send(event, text_msg)
         img_resp = await bot.send(event, MessageSegment.image(filepath.read_bytes()))
 
@@ -910,7 +1194,6 @@ async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
         asyncio.create_task(_recall_image())
         return
 
-    # 普通抽取：从普通食物中选（若无普通食物则从全部中选）
     ids = normal_ids if normal_ids else list(index.keys())
     short_id = random.choice(ids)
     entry = index[short_id]
@@ -922,13 +1205,17 @@ async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
         return
 
     await bot.send(event, "是啊，吃什么")
-    msg = MessageSegment.text("请你吃") + MessageSegment.text(label) + MessageSegment.text("怎么样？\n") + MessageSegment.image(filepath.read_bytes())
+    msg = (
+        MessageSegment.text("请你吃")
+        + MessageSegment.text(label)
+        + MessageSegment.text("怎么样？\n")
+        + MessageSegment.image(filepath.read_bytes())
+    )
     await bot.send(event, msg)
 
 
 @what_to_eat_matcher.handle()
 async def handle_what_to_eat(bot: Bot, event: GroupMessageEvent):
-    """检测『吃什么』：是啊，吃什么 + 随机一张图 请你吃『name』（id）怎么样 [图片]；单抽有概率触发隐藏食物"""
     await _handle_what_to_eat(bot, event)
     await what_to_eat_matcher.finish()
 

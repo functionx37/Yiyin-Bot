@@ -11,6 +11,7 @@
 """
 
 import base64
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,40 @@ def _build_http_timeout(timeout: float) -> httpx.Timeout:
         write=max(base * 2, 180.0),
         pool=min(base, 15.0),
     )
+
+
+def _parse_json_response(
+    resp: httpx.Response,
+    *,
+    log_prefix: str,
+    body_limit: int = 500,
+) -> dict[str, Any] | None:
+    """安全解析 JSON 响应，避免网关返回错误页时直接抛异常。"""
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as e:
+        logger.warning(
+            "{} JSON 解析失败: status={} content_type={} error={} body={}",
+            log_prefix,
+            resp.status_code,
+            resp.headers.get("content-type", ""),
+            e,
+            resp.text[:body_limit],
+        )
+        return None
+
+    if not isinstance(data, dict):
+        logger.warning(
+            "{} JSON 顶层不是对象: status={} content_type={} data_type={} body={}",
+            log_prefix,
+            resp.status_code,
+            resp.headers.get("content-type", ""),
+            type(data).__name__,
+            repr(data)[:body_limit],
+        )
+        return None
+
+    return data
 
 
 async def _download_image_as_data_url(
@@ -291,7 +326,13 @@ async def chat_completion(
             )
             return None
 
-        data = resp.json()
+        data = _parse_json_response(
+            resp,
+            log_prefix="chat_completion",
+            body_limit=500,
+        )
+        if data is None:
+            return None
         choices = data.get("choices", [])
         if not choices:
             logger.warning(
@@ -470,7 +511,13 @@ async def generate_image_edit(
             )
             return None
 
-        resp_data = resp.json()
+        resp_data = _parse_json_response(
+            resp,
+            log_prefix="generate_image_edit",
+            body_limit=500,
+        )
+        if resp_data is None:
+            return None
         items: list[dict[str, Any]] = resp_data.get("data", [])
         if not items:
             logger.warning("generate_image_edit data 为空: {}", resp_data)
@@ -621,7 +668,13 @@ async def generate_image_via_chat(
             )
             return None
 
-        data = resp.json()
+        data = _parse_json_response(
+            resp,
+            log_prefix="generate_image_via_chat",
+            body_limit=500,
+        )
+        if data is None:
+            return None
         choices = data.get("choices", [])
         if not choices:
             logger.warning("generate_image_via_chat choices 为空: {}", data)

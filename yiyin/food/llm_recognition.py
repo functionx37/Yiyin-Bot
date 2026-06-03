@@ -12,7 +12,7 @@ from nonebot.log import logger
 
 from yiyin.llmapi import ChatCompletionTransportError, chat_completion
 
-IMAGE_RECOG_MODEL = "gpt-4o"
+IMAGE_RECOG_MODEL = "gpt-5.4-mini"
 
 FOOD_PROMPT = """你是一个严格的图片分类器，你需要判断图本身是不是一张真实食物的实拍照片。只看图片内容，按以下规则回复，且只回复一行，不要有任何其他文字。
 

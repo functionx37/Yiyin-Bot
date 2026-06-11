@@ -34,6 +34,7 @@ from yiyin.food.llm_recognition import (
     recognize_food_with_labels_from_image_bytes,
     suggest_food_name_from_image_bytes,
 )
+from yiyin.image_utils import maybe_compress_large_png
 
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -503,8 +504,13 @@ async def _download_food_images(
                 resp.raise_for_status()
                 short_id = _generate_short_id(existing_ids)
                 existing_ids.add(short_id)
+                image_bytes, content_type, _ = maybe_compress_large_png(
+                    resp.content,
+                    resp.headers.get("content-type"),
+                    log_prefix=f"食物图片压缩[{short_id}]",
+                )
                 downloaded.append(
-                    (short_id, resp.content, resp.headers.get("content-type"))
+                    (short_id, image_bytes, content_type)
                 )
             except Exception:
                 logger.exception(f"下载食物图片失败: {url}")
@@ -678,7 +684,7 @@ async def save_foods_from_image_urls(
             item = resolved.get(short_id, {})
             entry_name = name if name is not None else item.get("name")
             entry_tags = normalized_tags if tags is not None else item.get("tags", [])
-            index[short_id] = {}
+            index[short_id] = {"filename": f"{short_id}.png"}
             _write_food_entry(
                 group_id,
                 index,

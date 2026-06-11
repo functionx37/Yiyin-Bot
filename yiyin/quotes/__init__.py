@@ -28,6 +28,8 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, Message
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
+from yiyin.image_utils import maybe_compress_large_png
+
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "quotes"
@@ -38,6 +40,14 @@ def _image_segment_from_path(filepath: Path) -> MessageSegment:
     if not filepath.exists():
         raise FileNotFoundError(f"图片不存在: {filepath}")
     return MessageSegment.image(filepath)
+
+
+def _quote_filename(short_id: str, entry: dict | None = None) -> str:
+    if isinstance(entry, dict):
+        filename = entry.get("filename")
+        if isinstance(filename, str) and filename.strip():
+            return filename
+    return f"{short_id}.png"
 
 
 def _get_group_dir(group_id: str) -> Path:
@@ -150,7 +160,7 @@ def _generate_short_id(existing_ids: set[str]) -> str:
 
 
 def _load_index(group_id: str) -> dict[str, dict]:
-    """加载语录索引 {short_id: {"member": str}}，图片文件名为 {short_id}.png。
+    """加载语录索引 {short_id: {"member": str}}，图片文件名默认 {short_id}.png。
     首次加载时自动为已有图片（旧格式或未索引）生成索引并规范化命名。"""
     index_file = _get_index_file(group_id)
     if index_file.exists():
@@ -164,7 +174,7 @@ def _load_index(group_id: str) -> dict[str, dict]:
         member = entry.get("member")
         if not member:
             continue
-        indexed_keys.add(f"{member}/{short_id}")  # 新格式: 文件为 short_id.png
+        indexed_keys.add(f"{member}/{short_id}")  # 新格式: 文件 stem 为 short_id
         fn = entry.get("filename")
         if fn:
             indexed_keys.add(f"{member}/{fn}")  # 旧格式兼容
@@ -210,7 +220,7 @@ def _save_index(group_id: str, index: dict[str, dict]) -> None:
 
 
 def _add_to_index(group_id: str, member: str) -> str:
-    """向索引中添加一条记录，返回生成的短ID。图片需保存为 images/{member}/{short_id}.png"""
+    """向索引中添加一条记录，返回生成的短ID。图片默认保存为 images/{member}/{short_id}.png"""
     index = _load_index(group_id)
     existing_ids = set(index.keys())
     short_id = _generate_short_id(existing_ids)
@@ -367,7 +377,7 @@ def _merge_member_quotes_into(
     for short_id, entry in list(index.items()):
         if entry.get("member") != from_member:
             continue
-        fn = entry.get("filename") or f"{short_id}.png"
+        fn = _quote_filename(short_id, entry)
         src = from_dir / fn
         if not src.exists():
             continue
@@ -549,7 +559,12 @@ async def _do_upload(
                 resp.raise_for_status()
                 short_id = _generate_short_id(existing_ids)
                 existing_ids.add(short_id)
-                downloaded.append((short_id, resp.content))
+                content, _, _ = maybe_compress_large_png(
+                    resp.content,
+                    resp.headers.get("content-type"),
+                    log_prefix=f"语录图片压缩[{short_id}]",
+                )
+                downloaded.append((short_id, content))
             except Exception:
                 logger.exception(f"下载语录图片失败: {url}")
                 if auto_registered:
@@ -570,14 +585,14 @@ async def _do_upload(
     # 全部下载成功，再写入 index 和文件（任一步失败则回滚）
     try:
         for short_id, content in downloaded:
-            index[short_id] = {"member": canonical}
-            filepath = image_dir / f"{short_id}.png"
+            index[short_id] = {"member": canonical, "filename": f"{short_id}.png"}
+            filepath = image_dir / _quote_filename(short_id, index[short_id])
             filepath.write_bytes(content)
         _save_index(group_id, index)
     except Exception:
         logger.exception("保存语录文件失败，回滚")
         for short_id, _ in downloaded:
-            (image_dir / f"{short_id}.png").unlink(missing_ok=True)
+            (image_dir / _quote_filename(short_id)).unlink(missing_ok=True)
         if auto_registered:
             members = _load_members(group_id)
             members.remove(canonical)
@@ -778,13 +793,18 @@ async def handle_screenshot_upload(
     index = _load_index(group_id)
     short_id = _generate_short_id(set(index.keys()))
     try:
-        index[short_id] = {"member": canonical}
-        filepath = image_dir / f"{short_id}.png"
+        screenshot_bytes, _, _ = maybe_compress_large_png(
+            screenshot_bytes,
+            "image/png",
+            log_prefix=f"语录截图压缩[{short_id}]",
+        )
+        index[short_id] = {"member": canonical, "filename": f"{short_id}.png"}
+        filepath = image_dir / _quote_filename(short_id, index[short_id])
         filepath.write_bytes(screenshot_bytes)
         _save_index(group_id, index)
     except Exception:
         logger.exception("保存截图失败，回滚")
-        (image_dir / f"{short_id}.png").unlink(missing_ok=True)
+        (image_dir / _quote_filename(short_id)).unlink(missing_ok=True)
         if auto_registered:
             members = _load_members(group_id)
             members.remove(canonical)
@@ -855,7 +875,7 @@ async def handle_view(
     images_dir = _get_group_dir(group_id) / "images" / canonical
     nodes = []
     for short_id, entry in member_entries:
-        fn = entry.get("filename") or f"{short_id}.png"
+        fn = _quote_filename(short_id, entry)
         filepath = images_dir / fn
         if not filepath.exists():
             continue
@@ -1062,7 +1082,7 @@ async def handle_delete_quote(
 
     entry = index[quote_id]
     member = entry["member"]
-    fn = entry.get("filename") or f"{quote_id}.png"
+    fn = _quote_filename(quote_id, entry)
     filepath = _get_member_image_dir(group_id, member) / fn
     if filepath.exists():
         filepath.unlink()

@@ -1,6 +1,7 @@
 """
 NoneBot2 食物图鉴插件（按群隔离）
 - 命令：/收集食物 (名字) (#夯/拉/NPC/人上人) (%（标签1）（标签2）) [图片]
+- 命令：/收集隐藏食物 (名字) (#夯/拉/NPC/人上人) (%（标签1）（标签2）) [图片]
 - 子模块 auto_collect：自动食物收集（常关，需 /启用 自动食物收集）
 - 命令：/删除食物 <id/名字> — 仅超级管理员，支持引用食物消息自动提取 ID
 - 命令：/补充名字 <id/名字> <新名字> — 支持引用食物消息后 /补充名字 新名字 自动提取 ID
@@ -52,6 +53,7 @@ RANK_ALIASES = {
 VALID_RANKS = {"夯", "人上人", "NPC", "拉"}
 MAX_EAT_CANDIDATES = 8
 EAT_SCORE_THRESHOLD = 0.42
+_COLLECT_COMMAND_RE = re.compile(r"[/.\!！](?P<command>收集隐藏食物|收集食物)(?=\s|$)")
 _COLLECT_RANK_RE = re.compile(r"(?:^|\s)#(夯爆了|夯|拉完了|拉|NPC|npc|人上人)(?=\s|$)")
 _COLLECT_TAGS_RE = re.compile(r"%(（[^）]+）(?:（[^）]+）)*)")
 _TAG_PARENS_RE = re.compile(r"（([^）]+)）")
@@ -288,6 +290,7 @@ def _write_food_entry(
     name: str | None = None,
     rank: str | None = None,
     tags: list[str] | None = None,
+    hidden: bool | None = None,
 ) -> None:
     entry = index.setdefault(food_id, {})
     if name is not None:
@@ -299,6 +302,8 @@ def _write_food_entry(
             [tag for tag in (_normalize_tag(tag) for tag in tags) if tag]
         )
         _record_labels(group_id, entry["tags"])
+    if hidden is not None:
+        entry["hidden"] = hidden
 
 
 def get_group_labels(group_id: str) -> list[str]:
@@ -491,6 +496,13 @@ def _extract_image_urls_from_segments(images: list[MessageSegment]) -> list[str]
     return urls
 
 
+def _extract_collect_command(text: str) -> tuple[str, str] | None:
+    m = _COLLECT_COMMAND_RE.search(text)
+    if not m:
+        return None
+    return m.group("command"), text[m.end() :].strip()
+
+
 async def _download_food_images(
     group_id: str, image_urls: list[str]
 ) -> list[tuple[str, bytes, str | None]] | None:
@@ -602,11 +614,13 @@ def _build_collect_food_success_message(
     manual_rank: str | None,
     manual_tags: list[str],
     auto_tag_hint: bool,
+    hidden: bool,
 ) -> str:
     id_str = "、".join(sid for sid, _, _ in downloaded)
     lines: list[str] = []
+    food_type = "隐藏食物图" if hidden else "食物图"
     if manual_name:
-        header = f"已保存 {len(downloaded)} 张食物图✓ 『{manual_name}』"
+        header = f"已保存 {len(downloaded)} 张{food_type}✓ 『{manual_name}』"
         header += _format_rank_suffix(manual_rank)
         header += _format_tags_suffix(manual_tags)
         lines.append(header)
@@ -616,11 +630,11 @@ def _build_collect_food_success_message(
         auto_named_count = sum(1 for item in resolved.values() if item.get("name"))
         if auto_named_count:
             lines.append(
-                f"已保存 {len(downloaded)} 张食物图✓ （已自动命名 {auto_named_count} 张，名称仅供参考，可用 /补充名字 <id> <名字> 调整）"
+                f"已保存 {len(downloaded)} 张{food_type}✓ （已自动命名 {auto_named_count} 张，名称仅供参考，可用 /补充名字 <id> <名字> 调整）"
             )
         else:
             lines.append(
-                f"已保存 {len(downloaded)} 张食物图✓ （未指定名字，且自动命名失败，可用 /补充名字 <id> <名字> 补充）"
+                f"已保存 {len(downloaded)} 张{food_type}✓ （未指定名字，且自动命名失败，可用 /补充名字 <id> <名字> 补充）"
             )
         for short_id, _, _ in downloaded:
             item = resolved.get(short_id, {})
@@ -651,6 +665,7 @@ async def save_foods_from_image_urls(
     *,
     rank: str | None = None,
     tags: list[str] | None = None,
+    hidden: bool = False,
     name_only_with_llm: bool = False,
     log_prefix: str = "收集食物自动命名",
     auto_tag_with_llm: bool = False,
@@ -692,6 +707,7 @@ async def save_foods_from_image_urls(
                 name=entry_name,
                 rank=normalized_rank,
                 tags=entry_tags,
+                hidden=hidden,
             )
             filepath = images_dir / f"{short_id}.png"
             filepath.write_bytes(content)
@@ -710,6 +726,7 @@ async def save_foods_from_image_urls(
         manual_rank=normalized_rank,
         manual_tags=normalized_tags,
         auto_tag_hint=auto_tag_with_llm,
+        hidden=hidden,
     )
 
 
@@ -740,7 +757,28 @@ def _collect_food_image_first_rule(event: GroupMessageEvent) -> bool:
     text = msg.extract_plain_text().strip()
     if not text:
         return False
-    if not re.search(r"[/.\!！]收集食物(?:\s|$)", text):
+    command = _extract_collect_command(text)
+    if not command or command[0] != "收集食物":
+        return False
+    has_image = any(seg.type == "image" for seg in msg)
+    if not has_image and not (
+        event.reply
+        and event.reply.message
+        and any(seg.type == "image" for seg in event.reply.message)
+    ):
+        return False
+    return True
+
+
+def _collect_hidden_food_image_first_rule(event: GroupMessageEvent) -> bool:
+    msg = event.get_message()
+    if not msg or msg[0].is_text():
+        return False
+    text = msg.extract_plain_text().strip()
+    if not text:
+        return False
+    command = _extract_collect_command(text)
+    if not command or command[0] != "收集隐藏食物":
         return False
     has_image = any(seg.type == "image" for seg in msg)
     if not has_image and not (
@@ -758,8 +796,20 @@ def _reply_percent_rule(event: GroupMessageEvent) -> bool:
 
 
 collect_food_cmd = on_command("收集食物", priority=10, block=True)
+collect_hidden_food_cmd = on_command(
+    "收集隐藏食物",
+    priority=10,
+    block=True,
+    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
+)
 collect_food_image_first_cmd = on_message(
     _collect_food_image_first_rule, priority=9, block=True
+)
+collect_hidden_food_image_first_cmd = on_message(
+    _collect_hidden_food_image_first_rule,
+    priority=9,
+    block=True,
+    permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER,
 )
 reply_percent_cmd = on_message(_reply_percent_rule, priority=10, block=True)
 delete_food_cmd = on_command("删除食物", priority=10, block=True, permission=SUPERUSER)
@@ -782,11 +832,13 @@ async def _do_collect_food(
     tags: list[str],
     args: Message,
     matcher: Matcher,
+    hidden: bool = False,
 ) -> None:
     images = await _extract_images(bot, event, args)
     if not images:
+        command_name = "/收集隐藏食物" if hidden else "/收集食物"
         await matcher.finish(
-            "请在命令中附带图片或引用含图片的消息，例如：/收集食物 (名字) [图片]"
+            f"请在命令中附带图片或引用含图片的消息，例如：{command_name} (名字) [图片]"
         )
 
     group_id = str(event.group_id)
@@ -800,6 +852,7 @@ async def _do_collect_food(
         name,
         rank=rank,
         tags=tags,
+        hidden=hidden,
         log_prefix="手动收集食物自动命名",
     )
     if not result:
@@ -820,12 +873,32 @@ async def handle_collect_food(
     )
 
 
+@collect_hidden_food_cmd.handle()
+async def handle_collect_hidden_food(
+    bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()
+):
+    text = args.extract_plain_text().strip()
+    name, rank, tags, err = _parse_collect_text(text)
+    if err:
+        await collect_hidden_food_cmd.finish(err)
+    await _do_collect_food(
+        bot,
+        event,
+        name=name,
+        rank=rank,
+        tags=tags,
+        args=args,
+        matcher=collect_hidden_food_cmd,
+        hidden=True,
+    )
+
+
 @collect_food_image_first_cmd.handle()
 async def handle_collect_food_image_first(bot: Bot, event: GroupMessageEvent):
     msg = event.get_message()
     text = msg.extract_plain_text().strip()
-    m = re.search(r"[/.\!！]收集食物\s*(.*)", text)
-    collect_text = m.group(1).strip() if m and m.group(1) else ""
+    command = _extract_collect_command(text)
+    collect_text = command[1] if command else ""
     name, rank, tags, err = _parse_collect_text(collect_text)
     if err:
         await collect_food_image_first_cmd.finish(err)
@@ -837,6 +910,29 @@ async def handle_collect_food_image_first(bot: Bot, event: GroupMessageEvent):
         tags=tags,
         args=msg,
         matcher=collect_food_image_first_cmd,
+    )
+
+
+@collect_hidden_food_image_first_cmd.handle()
+async def handle_collect_hidden_food_image_first(
+    bot: Bot, event: GroupMessageEvent
+):
+    msg = event.get_message()
+    text = msg.extract_plain_text().strip()
+    command = _extract_collect_command(text)
+    collect_text = command[1] if command else ""
+    name, rank, tags, err = _parse_collect_text(collect_text)
+    if err:
+        await collect_hidden_food_image_first_cmd.finish(err)
+    await _do_collect_food(
+        bot,
+        event,
+        name=name,
+        rank=rank,
+        tags=tags,
+        args=msg,
+        matcher=collect_hidden_food_image_first_cmd,
+        hidden=True,
     )
 
 

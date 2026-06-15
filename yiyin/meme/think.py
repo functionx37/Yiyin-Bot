@@ -63,8 +63,8 @@ _COMMON_TEMPLATE = _TemplateConfig(
     bubble_width_ratio=0.43,
     bubble_height_ratio=0.215,
     bubble_padding_ratio=0.02,
-    center_offset_x_ratio=0.01,
-    center_offset_y_ratio=0.065,
+    center_offset_x_ratio=0.02,
+    center_offset_y_ratio=0.07,
 )
 
 

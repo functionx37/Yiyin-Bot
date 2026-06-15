@@ -19,6 +19,7 @@ import random
 import re
 import string
 from difflib import SequenceMatcher
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 from yiyin.food.llm_recognition import (
     recognize_food_from_image_bytes,
@@ -229,6 +231,198 @@ def _get_food_image_path(
     filename = entry.get("filename") or f"{food_id}.png"
     images_dir = _get_hidden_images_dir(group_id) if hidden else _get_images_dir(group_id)
     return images_dir / filename
+
+
+def _fit_image_within(
+    image: Image.Image,
+    *,
+    max_width: int,
+    max_height: int,
+    max_scale: float = 1.15,
+) -> Image.Image:
+    width_ratio = max_width / max(1, image.width)
+    height_ratio = max_height / max(1, image.height)
+    scale = min(width_ratio, height_ratio, max_scale)
+    if scale <= 0:
+        scale = 1.0
+    target_w = max(1, int(round(image.width * scale)))
+    target_h = max(1, int(round(image.height * scale)))
+    if target_w == image.width and target_h == image.height:
+        return image.copy()
+    return image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+
+def _create_rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (0, 0, size[0] - 1, size[1] - 1), radius=radius, fill=255
+    )
+    return mask
+
+
+def _create_feast_background(width: int, height: int) -> Image.Image:
+    canvas = Image.new("RGBA", (width, height), (245, 239, 230, 255))
+    draw = ImageDraw.Draw(canvas)
+    top = (250, 246, 240)
+    bottom = (233, 224, 212)
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        color = tuple(int(top[i] * (1 - ratio) + bottom[i] * ratio) for i in range(3))
+        draw.line((0, y, width, y), fill=color + (255,))
+
+    accents = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    accent_draw = ImageDraw.Draw(accents)
+    accent_draw.ellipse((-140, -120, 420, 380), fill=(255, 255, 255, 78))
+    accent_draw.ellipse((width - 440, -100, width + 140, 440), fill=(222, 203, 177, 78))
+    accent_draw.ellipse((width - 240, height - 360, width + 120, height + 60), fill=(246, 237, 222, 68))
+    accent_draw.ellipse((-180, height - 420, 260, height + 40), fill=(255, 249, 241, 62))
+    accents = accents.filter(ImageFilter.GaussianBlur(56))
+    canvas.alpha_composite(accents)
+    return canvas
+
+
+def _render_feast_collage(
+    group_id: str,
+    food_ids: list[str],
+    index: dict[str, dict],
+) -> bytes | None:
+    if not food_ids:
+        return None
+
+    count = len(food_ids)
+    if count == 1:
+        column_count = 1
+        canvas_width = 960
+        max_image_height = 780
+    elif count <= 4:
+        column_count = 2
+        canvas_width = 1080
+        max_image_height = 620
+    else:
+        column_count = 3
+        canvas_width = 1280
+        max_image_height = 470
+
+    outer_padding = 52
+    top_padding = 52
+    bottom_padding = 52
+    gap = 28
+    card_padding = 18
+    card_radius = 34
+    image_radius = 28
+    content_width = canvas_width - outer_padding * 2
+    card_width = (content_width - gap * (column_count - 1)) // column_count
+    max_image_width = max(1, card_width - card_padding * 2)
+
+    cards: list[dict[str, object]] = []
+    for food_id in food_ids:
+        entry = index.get(food_id)
+        if not isinstance(entry, dict):
+            continue
+        image_path = _get_food_image_path(group_id, food_id, entry, hidden=False)
+        if not image_path.exists():
+            logger.warning("吃大餐拼图缺少图片: group_id={} food_id={}", group_id, food_id)
+            continue
+        try:
+            with Image.open(image_path) as raw:
+                raw.load()
+                source = ImageOps.exif_transpose(raw).convert("RGB")
+        except Exception:
+            logger.exception("读取吃大餐拼图图片失败: group_id={} food_id={}", group_id, food_id)
+            continue
+
+        fitted = _fit_image_within(
+            source,
+            max_width=max_image_width,
+            max_height=max_image_height,
+        )
+        card_height = fitted.height + card_padding * 2
+        cards.append(
+            {
+                "image": fitted,
+                "card_height": card_height,
+            }
+        )
+
+    if not cards:
+        return None
+
+    placements: list[dict[str, object]] = []
+    column_heights = [0] * column_count
+    for card in cards:
+        column = min(range(column_count), key=lambda idx: column_heights[idx])
+        x = outer_padding + column * (card_width + gap)
+        y = top_padding + column_heights[column]
+        placements.append(
+            {
+                "x": x,
+                "y": y,
+                "card_height": int(card["card_height"]),
+                "image": card["image"],
+            }
+        )
+        column_heights[column] += int(card["card_height"]) + gap
+
+    used_height = max(column_heights) - gap if placements else 0
+    canvas_height = top_padding + used_height + bottom_padding
+    canvas = _create_feast_background(canvas_width, canvas_height)
+    card_palette = [
+        (255, 255, 255, 236),
+        (255, 250, 245, 236),
+        (250, 245, 238, 236),
+        (250, 248, 243, 236),
+    ]
+
+    for idx, placement in enumerate(placements):
+        x = int(placement["x"])
+        y = int(placement["y"])
+        image = placement["image"]
+        if not isinstance(image, Image.Image):
+            continue
+        card_height = int(placement["card_height"])
+        shadow = Image.new("RGBA", (card_width + 60, card_height + 60), (0, 0, 0, 0))
+        shadow_draw = ImageDraw.Draw(shadow)
+        shadow_draw.rounded_rectangle(
+            (18, 18, 18 + card_width, 18 + card_height),
+            radius=card_radius,
+            fill=(83, 67, 47, 54),
+        )
+        shadow = shadow.filter(ImageFilter.GaussianBlur(18))
+        canvas.alpha_composite(shadow, dest=(x - 18, y - 10))
+
+        card_layer = Image.new("RGBA", (card_width, card_height), (0, 0, 0, 0))
+        card_draw = ImageDraw.Draw(card_layer)
+        card_draw.rounded_rectangle(
+            (0, 0, card_width - 1, card_height - 1),
+            radius=card_radius,
+            fill=card_palette[idx % len(card_palette)],
+            outline=(228, 219, 206, 255),
+            width=2,
+        )
+        chip_color = [
+            (198, 128, 91, 255),
+            (140, 164, 124, 255),
+            (188, 150, 100, 255),
+            (148, 133, 170, 255),
+        ][idx % 4]
+        card_draw.rounded_rectangle((16, 14, 78, 22), radius=4, fill=chip_color)
+
+        image_x = (card_width - image.width) // 2
+        image_y = card_padding
+        image_mask = _create_rounded_mask((image.width, image.height), image_radius)
+        image_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        image_layer.paste(image.convert("RGBA"), (0, 0))
+        card_layer.paste(image_layer, (image_x, image_y), image_mask)
+        canvas.alpha_composite(card_layer, dest=(x, y))
+
+    output = BytesIO()
+    canvas.convert("RGB").save(output, format="PNG", optimize=True)
+    image_bytes, _, _ = maybe_compress_large_png(
+        output.getvalue(),
+        "image/png",
+        log_prefix="吃大餐拼图",
+    )
+    return image_bytes
 
 
 def _get_food_entry_context(
@@ -1489,7 +1683,6 @@ async def handle_feast(
     count = max(1, min(7, count))
 
     index = _load_index(group_id)
-    hidden_index = _load_index(group_id, hidden=True)
     if not index:
         await feast_cmd.finish(
             "本群还没有收集任何食物，使用 /收集食物 [名字] [图片] 来添加吧"
@@ -1505,37 +1698,31 @@ async def handle_feast(
             f"本群目前只有 {len(ids)} 道菜，无法凑齐 {count} 道，试试 /吃大餐 {len(ids)}"
         )
 
+    hidden_index = _load_index(group_id, hidden=True)
+    hidden_pick_id: str | None = None
+    if _get_hidden_food_ids(hidden_index):
+        prob = _load_hidden_prob(group_id)
+        hidden_pick_id, prob, index_changed = _roll_hidden_food_once(group_id, hidden_index, prob)
+        _save_hidden_prob(group_id, prob)
+        if index_changed:
+            _save_index(group_id, hidden_index, hidden=True)
+
     chosen_ids = random.sample(ids, count)
-    hidden_reveals: list[str] = []
-    prob = _load_hidden_prob(group_id)
-    hidden_index_changed = False
-    for _ in range(count):
-        hidden_id, prob, changed = _roll_hidden_food_once(group_id, hidden_index, prob)
-        hidden_index_changed = hidden_index_changed or changed
-        if hidden_id:
-            hidden_reveals.append(hidden_id)
-    _save_hidden_prob(group_id, prob)
-    if hidden_index_changed:
-        _save_index(group_id, hidden_index, hidden=True)
+    collage_bytes = _render_feast_collage(group_id, chosen_ids, index)
+    if not collage_bytes:
+        await feast_cmd.finish("生成大餐拼图失败，请稍后重试")
 
-    parts: list[MessageSegment] = []
-    for i, short_id in enumerate(chosen_ids, 1):
-        entry = index[short_id]
-        name = entry.get("name") or None
-        label = _format_food_label(short_id, name)
-        ordinal = "第一道菜" if i == 1 else f"第{i}道菜"
-        text_seg = MessageSegment.text(f"{ordinal}：{label}\n")
-        parts.append(text_seg)
-        filepath = _get_food_image_path(group_id, short_id, entry, hidden=False)
-        if filepath.exists():
-            parts.append(MessageSegment.image(filepath.read_bytes()))
-    await bot.send(event, Message(parts))
+    feast_message = (
+        MessageSegment.at(event.get_user_id())
+        + MessageSegment.text(" 请你吃大餐：\n")
+        + MessageSegment.image(collage_bytes)
+    )
+    await bot.send(event, feast_message)
 
-    for hidden_id in hidden_reveals:
-        entry = hidden_index.get(hidden_id)
-        if not isinstance(entry, dict):
-            continue
-        await _send_hidden_food_reveal(bot, event, group_id, hidden_id, entry)
+    if hidden_pick_id:
+        entry = hidden_index.get(hidden_pick_id)
+        if isinstance(entry, dict):
+            await _send_hidden_food_reveal(bot, event, group_id, hidden_pick_id, entry)
 
     await feast_cmd.finish()
 

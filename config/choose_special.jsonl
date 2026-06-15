@@ -5,3 +5,4 @@
 {"condition":{"or":["尼康","佳能","索尼","富士"]},"answer":"徐州老味菜"}
 {"condition":{"or":["萝莉"]},"answer":"萝莉"}
 {"condition":{"or":["小雷","大雷"]},"answer":"男娘"}
+{"condition":{"or":["活着"]},"answer":"活着"}

@@ -32,7 +32,7 @@ from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
 from yiyin.food.llm_recognition import (
-    recognize_food_with_labels_from_image_bytes,
+    recognize_food_from_image_bytes,
     suggest_food_name_from_image_bytes,
 )
 from yiyin.image_utils import maybe_compress_large_png
@@ -74,8 +74,16 @@ def _get_index_file(group_id: str) -> Path:
     return _get_group_dir(group_id) / "index.json"
 
 
+def _get_hidden_index_file(group_id: str) -> Path:
+    return _get_group_dir(group_id) / "hidden_index.json"
+
+
 def _get_images_dir(group_id: str) -> Path:
     return _get_group_dir(group_id) / "images"
+
+
+def _get_hidden_images_dir(group_id: str) -> Path:
+    return _get_group_dir(group_id) / "hidden_images"
 
 
 def _get_hidden_prob_file(group_id: str) -> Path:
@@ -84,6 +92,14 @@ def _get_hidden_prob_file(group_id: str) -> Path:
 
 def _get_labels_file(group_id: str) -> Path:
     return _get_group_dir(group_id) / "label.json"
+
+
+def _get_hidden_owners_file(group_id: str) -> Path:
+    return _get_group_dir(group_id) / "hidden_owners.json"
+
+
+def _get_hidden_up_state_file(group_id: str) -> Path:
+    return _get_group_dir(group_id) / "hidden_up_state.json"
 
 
 def _load_hidden_prob(group_id: str) -> int:
@@ -105,6 +121,65 @@ def _save_hidden_prob(group_id: str, prob: int) -> None:
         json.dump({"prob": prob}, fp, ensure_ascii=False)
 
 
+def _load_hidden_owners(group_id: str) -> dict[str, list[str]]:
+    path = _get_hidden_owners_file(group_id)
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        logger.exception("读取隐藏食物 owner 配置失败")
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for owner, aliases in raw.items():
+        if not isinstance(owner, str):
+            continue
+        owner_name = owner.strip()
+        if not owner_name:
+            continue
+        alias_list: list[str] = []
+        if isinstance(aliases, list):
+            for alias in aliases:
+                if isinstance(alias, str) and alias.strip():
+                    alias_list.append(alias.strip())
+        result[owner_name] = alias_list
+    return result
+
+
+def _load_hidden_up_state(group_id: str) -> dict[str, object]:
+    path = _get_hidden_up_state_file(group_id)
+    if not path.exists():
+        return {"up": "", "guaranteed": False}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        logger.exception("读取隐藏食物 up 状态失败")
+        return {"up": "", "guaranteed": False}
+    if not isinstance(raw, dict):
+        return {"up": "", "guaranteed": False}
+    up = raw.get("up")
+    guaranteed = raw.get("guaranteed")
+    return {
+        "up": up.strip() if isinstance(up, str) else "",
+        "guaranteed": bool(guaranteed),
+    }
+
+
+def _save_hidden_up_state(group_id: str, state: dict[str, object]) -> None:
+    path = _get_hidden_up_state_file(group_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "up": str(state.get("up") or "").strip(),
+        "guaranteed": bool(state.get("guaranteed")),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 def _generate_short_id(existing_ids: set[str]) -> str:
     chars = string.ascii_letters + string.digits
     while True:
@@ -113,8 +188,8 @@ def _generate_short_id(existing_ids: set[str]) -> str:
             return short_id
 
 
-def _load_index(group_id: str) -> dict[str, dict]:
-    index_file = _get_index_file(group_id)
+def _load_index(group_id: str, *, hidden: bool = False) -> dict[str, dict]:
+    index_file = _get_hidden_index_file(group_id) if hidden else _get_index_file(group_id)
     if not index_file.exists():
         return {}
     try:
@@ -122,15 +197,53 @@ def _load_index(group_id: str) -> dict[str, dict]:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except Exception:
-        logger.exception("读取食物索引失败")
+        logger.exception("读取{}食物索引失败", "隐藏" if hidden else "")
         return {}
 
 
-def _save_index(group_id: str, index: dict[str, dict]) -> None:
-    index_file = _get_index_file(group_id)
+def _save_index(group_id: str, index: dict[str, dict], *, hidden: bool = False) -> None:
+    index_file = _get_hidden_index_file(group_id) if hidden else _get_index_file(group_id)
     index_file.parent.mkdir(parents=True, exist_ok=True)
     with open(index_file, "w", encoding="utf-8") as f:
         json.dump(index, f, ensure_ascii=False, indent=2)
+
+
+def _load_all_indexes(group_id: str) -> dict[str, dict]:
+    normal_index = _load_index(group_id)
+    hidden_index = _load_index(group_id, hidden=True)
+    merged = dict(normal_index)
+    for food_id, entry in hidden_index.items():
+        if food_id in merged:
+            logger.warning("食物ID同时存在于普通和隐藏索引中：group_id={} food_id={}", group_id, food_id)
+        merged[food_id] = entry
+    return merged
+
+
+def _get_food_image_path(
+    group_id: str,
+    food_id: str,
+    entry: dict,
+    *,
+    hidden: bool = False,
+) -> Path:
+    filename = entry.get("filename") or f"{food_id}.png"
+    images_dir = _get_hidden_images_dir(group_id) if hidden else _get_images_dir(group_id)
+    return images_dir / filename
+
+
+def _get_food_entry_context(
+    group_id: str, food_id: str
+) -> tuple[bool, dict[str, dict], dict] | None:
+    normal_index = _load_index(group_id)
+    normal_entry = normal_index.get(food_id)
+    if isinstance(normal_entry, dict):
+        return False, normal_index, normal_entry
+
+    hidden_index = _load_index(group_id, hidden=True)
+    hidden_entry = hidden_index.get(food_id)
+    if isinstance(hidden_entry, dict):
+        return True, hidden_index, hidden_entry
+    return None
 
 
 def _normalize_tag(tag: str | None) -> str | None:
@@ -163,6 +276,11 @@ def _get_tags(entry: dict) -> list[str]:
     return _dedupe_keep_order(result)
 
 
+def _get_hidden_owner(entry: dict) -> str:
+    owner = entry.get("owner")
+    return owner.strip() if isinstance(owner, str) else ""
+
+
 def _normalize_rank(rank: str | None) -> str | None:
     if not isinstance(rank, str):
         return None
@@ -181,7 +299,7 @@ def _ensure_labels_initialized(group_id: str) -> list[str]:
     labels_file = _get_labels_file(group_id)
     if labels_file.exists():
         return _load_labels(group_id)
-    index = _load_index(group_id)
+    index = _load_all_indexes(group_id)
     labels: list[str] = []
     for entry in index.values():
         if isinstance(entry, dict):
@@ -290,7 +408,7 @@ def _write_food_entry(
     name: str | None = None,
     rank: str | None = None,
     tags: list[str] | None = None,
-    hidden: bool | None = None,
+    owner: str | None = None,
 ) -> None:
     entry = index.setdefault(food_id, {})
     if name is not None:
@@ -302,12 +420,8 @@ def _write_food_entry(
             [tag for tag in (_normalize_tag(tag) for tag in tags) if tag]
         )
         _record_labels(group_id, entry["tags"])
-    if hidden is not None:
-        entry["hidden"] = hidden
-
-
-def get_group_labels(group_id: str) -> list[str]:
-    return _load_labels(group_id)
+    if owner is not None:
+        entry["owner"] = owner
 
 
 def _format_food_label(short_id: str, name: str | None) -> str:
@@ -398,16 +512,15 @@ async def _extract_food_ids_from_reply(bot: Bot, event: GroupMessageEvent) -> li
 
 
 def delete_food(group_id: str, food_id: str) -> bool:
-    index = _load_index(group_id)
-    if food_id not in index:
+    context = _get_food_entry_context(group_id, food_id)
+    if context is None:
         return False
-    entry = index[food_id]
-    fn = entry.get("filename") or f"{food_id}.png"
-    filepath = _get_images_dir(group_id) / fn
+    hidden, index, entry = context
+    filepath = _get_food_image_path(group_id, food_id, entry, hidden=hidden)
     if filepath.exists():
         filepath.unlink()
     del index[food_id]
-    _save_index(group_id, index)
+    _save_index(group_id, index, hidden=hidden)
     return True
 
 
@@ -415,23 +528,39 @@ def _has_hidden_been_selected(entry: dict) -> bool:
     return bool(entry.get("hidden_selected"))
 
 
-def _get_hidden_food_ids(
-    index: dict[str, dict], *, only_unrandomed: bool = False
-) -> list[str]:
+def _get_hidden_food_ids(index: dict[str, dict], *, only_unrandomed: bool = False) -> list[str]:
     result: list[str] = []
     for sid, entry in index.items():
-        if not entry.get("hidden"):
-            continue
         if only_unrandomed and _has_hidden_been_selected(entry):
             continue
         result.append(sid)
     return result
 
 
-def _clear_hidden_selected_marks(index: dict[str, dict]) -> bool:
+def _match_hidden_owner(group_id: str, food_name: str | None) -> str:
+    if not isinstance(food_name, str) or not food_name.strip():
+        return ""
+    name = food_name.strip()
+    matched: list[tuple[int, int, str]] = []
+    for owner, aliases in _load_hidden_owners(group_id).items():
+        tokens = [owner, *aliases]
+        for token in tokens:
+            if token and token in name:
+                matched.append((len(token), 1 if token == owner else 0, owner))
+    if not matched:
+        return ""
+    matched.sort(reverse=True)
+    return matched[0][2]
+
+
+def _hidden_owner_mode_enabled(group_id: str) -> bool:
+    return _get_hidden_owners_file(group_id).exists()
+
+
+def _clear_hidden_selected_marks_for_owner(index: dict[str, dict], owner: str) -> bool:
     changed = False
     for entry in index.values():
-        if not entry.get("hidden"):
+        if _get_hidden_owner(entry) != owner:
             continue
         if "hidden_selected" in entry:
             entry.pop("hidden_selected", None)
@@ -439,7 +568,86 @@ def _clear_hidden_selected_marks(index: dict[str, dict]) -> bool:
     return changed
 
 
-def _pick_hidden_food_for_random(index: dict[str, dict]) -> tuple[str | None, bool]:
+def _pick_hidden_food_for_owner(
+    index: dict[str, dict], owner: str
+) -> tuple[str | None, bool]:
+    owner_ids = [sid for sid, entry in index.items() if _get_hidden_owner(entry) == owner]
+    if not owner_ids:
+        return None, False
+
+    if all(_has_hidden_been_selected(index[sid]) for sid in owner_ids):
+        changed = _clear_hidden_selected_marks_for_owner(index, owner)
+    else:
+        changed = False
+
+    weights = [
+        0.5 if _has_hidden_been_selected(index[sid]) else 1.0
+        for sid in owner_ids
+    ]
+    short_id = random.choices(owner_ids, weights=weights, k=1)[0]
+    entry = index[short_id]
+    if not _has_hidden_been_selected(entry):
+        entry["hidden_selected"] = True
+        changed = True
+    return short_id, changed
+
+
+def _pick_hidden_food_with_owner_mode(
+    group_id: str, index: dict[str, dict]
+) -> tuple[str | None, bool]:
+    owners = _load_hidden_owners(group_id)
+    up_state = _load_hidden_up_state(group_id)
+    up_owner = str(up_state.get("up") or "").strip()
+    guaranteed = bool(up_state.get("guaranteed"))
+
+    owner_pool = {
+        owner
+        for owner in owners.keys()
+        if any(_get_hidden_owner(entry) == owner for entry in index.values())
+    }
+    if up_owner and up_owner not in owner_pool:
+        up_owner = ""
+        guaranteed = False
+
+    chosen_owner = ""
+    if up_owner:
+        if guaranteed:
+            chosen_owner = up_owner
+            guaranteed = False
+        elif random.random() < 0.5:
+            chosen_owner = up_owner
+        else:
+            guaranteed = True
+
+    if chosen_owner:
+        short_id, index_changed = _pick_hidden_food_for_owner(index, chosen_owner)
+        _save_hidden_up_state(group_id, {"up": up_owner, "guaranteed": guaranteed})
+        return short_id, index_changed
+
+    if not owner_pool:
+        _save_hidden_up_state(group_id, {"up": up_owner, "guaranteed": guaranteed})
+        return None, False
+    random_owner = random.choice(sorted(owner_pool))
+    short_id, changed = _pick_hidden_food_for_owner(index, random_owner)
+    _save_hidden_up_state(group_id, {"up": up_owner, "guaranteed": guaranteed})
+    return short_id, changed
+
+
+def _clear_hidden_selected_marks(index: dict[str, dict]) -> bool:
+    changed = False
+    for entry in index.values():
+        if "hidden_selected" in entry:
+            entry.pop("hidden_selected", None)
+            changed = True
+    return changed
+
+
+def _pick_hidden_food_for_random(
+    group_id: str, index: dict[str, dict]
+) -> tuple[str | None, bool]:
+    if _hidden_owner_mode_enabled(group_id):
+        return _pick_hidden_food_with_owner_mode(group_id, index)
+
     hidden_ids = _get_hidden_food_ids(index)
     if not hidden_ids:
         return None, False
@@ -458,10 +666,24 @@ def _pick_hidden_food_for_random(index: dict[str, dict]) -> tuple[str | None, bo
     return short_id, changed
 
 
+def _roll_hidden_food_once(
+    group_id: str,
+    hidden_index: dict[str, dict],
+    current_prob: int,
+) -> tuple[str | None, int, bool]:
+    """执行一次隐藏食物判定，返回 (抽中的隐藏食物ID, 新概率, 隐藏索引是否被修改)。"""
+    if not hidden_index:
+        return None, current_prob, False
+    if random.randint(1, 100) <= current_prob:
+        short_id, index_changed = _pick_hidden_food_for_random(group_id, hidden_index)
+        return short_id, 3, index_changed
+    return None, min(100, current_prob + 1), False
+
+
 def _resolve_id_or_name(
     group_id: str, id_or_name: str, *, allow_dup: bool = False
 ) -> tuple[list[str] | None, str | None]:
-    index = _load_index(group_id)
+    index = _load_all_indexes(group_id)
     if not id_or_name or not id_or_name.strip():
         return None, "请输入食物ID或名字"
 
@@ -506,7 +728,7 @@ def _extract_collect_command(text: str) -> tuple[str, str] | None:
 async def _download_food_images(
     group_id: str, image_urls: list[str]
 ) -> list[tuple[str, bytes, str | None]] | None:
-    index = _load_index(group_id)
+    index = _load_all_indexes(group_id)
     existing_ids = set(index.keys())
     downloaded: list[tuple[str, bytes, str | None]] = []
     async with httpx.AsyncClient(follow_redirects=True) as client:
@@ -536,7 +758,6 @@ async def _resolve_food_metadata(
     *,
     name_only_with_llm: bool,
     log_prefix: str,
-    label_pool: list[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     resolved: dict[str, dict[str, Any]] = {}
     if name:
@@ -555,53 +776,24 @@ async def _resolve_food_metadata(
                 for _, content, content_type in downloaded
             ]
         )
-        label_results: list[dict[str, object]]
-        if label_pool:
-            label_results = await asyncio.gather(
-                *[
-                    recognize_food_with_labels_from_image_bytes(
-                        content,
-                        content_type,
-                        label_pool=label_pool,
-                        log_prefix=log_prefix,
-                    )
-                    for _, content, content_type in downloaded
-                ]
-            )
-        else:
-            label_results = [{"type": "OTHER", "tags": []} for _ in downloaded]
-        for (short_id, _, _), auto_name, label_result in zip(
-            downloaded, name_results, label_results
-        ):
-            resolved[short_id] = {
-                "name": auto_name,
-                "tags": label_result.get("tags", []) if isinstance(label_result, dict) else [],
-            }
+        for (short_id, _, _), auto_name in zip(downloaded, name_results):
+            resolved[short_id] = {"name": auto_name, "tags": []}
         return resolved
 
     recog_results = await asyncio.gather(
         *[
-            recognize_food_with_labels_from_image_bytes(
+            recognize_food_from_image_bytes(
                 content,
                 content_type,
-                label_pool=label_pool or [],
                 log_prefix=log_prefix,
             )
             for _, content, content_type in downloaded
         ]
     )
-    for (short_id, _, _), result in zip(downloaded, recog_results):
+    for (short_id, _, _), (rec_type, auto_name) in zip(downloaded, recog_results):
         resolved[short_id] = {
-            "name": result.get("name") if result.get("type") == "FOOD" else None,
-            "tags": _dedupe_keep_order(
-                [
-                    tag
-                    for tag in (
-                        _normalize_tag(tag) for tag in result.get("tags", []) or []
-                    )
-                    if tag
-                ]
-            ),
+            "name": auto_name if rec_type == "FOOD" else None,
+            "tags": [],
         }
     return resolved
 
@@ -613,7 +805,6 @@ def _build_collect_food_success_message(
     manual_name: str | None,
     manual_rank: str | None,
     manual_tags: list[str],
-    auto_tag_hint: bool,
     hidden: bool,
 ) -> str:
     id_str = "、".join(sid for sid, _, _ in downloaded)
@@ -624,8 +815,6 @@ def _build_collect_food_success_message(
         header += _format_rank_suffix(manual_rank)
         header += _format_tags_suffix(manual_tags)
         lines.append(header)
-        if auto_tag_hint and manual_tags:
-            lines.append(f"已自动标记标签：{'、'.join(manual_tags)}")
     else:
         auto_named_count = sum(1 for item in resolved.values() if item.get("name"))
         if auto_named_count:
@@ -644,16 +833,6 @@ def _build_collect_food_success_message(
             if item_tags:
                 label_line += _format_tags_suffix(item_tags)
             lines.append(label_line)
-        if auto_tag_hint:
-            auto_tags = _dedupe_keep_order(
-                [
-                    tag
-                    for short_id, _, _ in downloaded
-                    for tag in resolved.get(short_id, {}).get("tags", [])
-                ]
-            )
-            if auto_tags:
-                lines.append(f"已自动标记标签：{'、'.join(auto_tags)}")
     lines.append(f"食物ID：{id_str}")
     return "\n".join(lines)
 
@@ -668,7 +847,6 @@ async def save_foods_from_image_urls(
     hidden: bool = False,
     name_only_with_llm: bool = False,
     log_prefix: str = "收集食物自动命名",
-    auto_tag_with_llm: bool = False,
 ) -> str | None:
     if not image_urls:
         return None
@@ -682,23 +860,22 @@ async def save_foods_from_image_urls(
     if not downloaded:
         return None
 
-    label_pool = _load_labels(group_id) if auto_tag_with_llm else []
     resolved = await _resolve_food_metadata(
         downloaded,
         name,
         name_only_with_llm=name_only_with_llm,
         log_prefix=log_prefix,
-        label_pool=label_pool,
     )
 
-    index = _load_index(group_id)
-    images_dir = _get_images_dir(group_id)
+    index = _load_index(group_id, hidden=hidden)
+    images_dir = _get_hidden_images_dir(group_id) if hidden else _get_images_dir(group_id)
     images_dir.mkdir(parents=True, exist_ok=True)
     try:
         for short_id, content, _ in downloaded:
             item = resolved.get(short_id, {})
             entry_name = name if name is not None else item.get("name")
             entry_tags = normalized_tags if tags is not None else item.get("tags", [])
+            owner = _match_hidden_owner(group_id, entry_name) if hidden else ""
             index[short_id] = {"filename": f"{short_id}.png"}
             _write_food_entry(
                 group_id,
@@ -707,11 +884,11 @@ async def save_foods_from_image_urls(
                 name=entry_name,
                 rank=normalized_rank,
                 tags=entry_tags,
-                hidden=hidden,
+                owner=owner if hidden else None,
             )
             filepath = images_dir / f"{short_id}.png"
             filepath.write_bytes(content)
-        _save_index(group_id, index)
+        _save_index(group_id, index, hidden=hidden)
     except Exception:
         logger.exception("保存食物文件失败，回滚")
         for short_id, _, _ in downloaded:
@@ -725,7 +902,6 @@ async def save_foods_from_image_urls(
         manual_name=name,
         manual_rank=normalized_rank,
         manual_tags=normalized_tags,
-        auto_tag_hint=auto_tag_with_llm,
         hidden=hidden,
     )
 
@@ -745,7 +921,6 @@ async def add_food_from_image_url(
         rank=rank,
         tags=tags,
         log_prefix="自动食物收集",
-        auto_tag_with_llm=tags is not None,
     )
     return result
 
@@ -817,6 +992,7 @@ supplement_name_cmd = on_command("补充名字", priority=10, block=True)
 hidden_food_cmd = on_command(
     "隐藏", priority=10, block=True, permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER
 )
+up_cmd = on_command("up", priority=10, block=True, permission=SUPERUSER | GROUP_ADMIN | GROUP_OWNER)
 feast_cmd = on_command("吃大餐", priority=10, block=True)
 eat_cmd = on_command("吃", priority=10, block=True)
 tag_food_cmd = on_command("标记", priority=10, block=True)
@@ -951,9 +1127,10 @@ async def handle_reply_percent(
 
     group_id = str(event.group_id)
     food_id = reply_ids[0]
-    index = _load_index(group_id)
-    if food_id not in index:
+    context = _get_food_entry_context(group_id, food_id)
+    if context is None:
         await reply_percent_cmd.finish(f"食物ID『{food_id}』不存在")
+    hidden, index, _ = context
 
     _write_food_entry(
         group_id,
@@ -963,7 +1140,7 @@ async def handle_reply_percent(
         rank=rank if rank is not None else None,
         tags=tags if tags is not None else None,
     )
-    _save_index(group_id, index)
+    _save_index(group_id, index, hidden=hidden)
 
     entry = index[food_id]
     parts: list[str] = [f"已更新食物（ID：{food_id}）"]
@@ -998,14 +1175,15 @@ async def handle_delete_food(
         await delete_food_cmd.finish(err)
 
     food_id = ids[0]
-    index = _load_index(group_id)
-    entry = index[food_id]
-    fn = entry.get("filename") or f"{food_id}.png"
-    filepath = _get_images_dir(group_id) / fn
+    context = _get_food_entry_context(group_id, food_id)
+    if context is None:
+        await delete_food_cmd.finish(f"食物ID『{food_id}』不存在")
+    hidden, index, entry = context
+    filepath = _get_food_image_path(group_id, food_id, entry, hidden=hidden)
     if filepath.exists():
         filepath.unlink()
     del index[food_id]
-    _save_index(group_id, index)
+    _save_index(group_id, index, hidden=hidden)
     await delete_food_cmd.finish(f"已删除食物（ID：{food_id}）✓")
 
 
@@ -1034,9 +1212,12 @@ async def handle_supplement_name(
         await supplement_name_cmd.finish(err)
 
     food_id = ids[0]
-    index = _load_index(group_id)
+    context = _get_food_entry_context(group_id, food_id)
+    if context is None:
+        await supplement_name_cmd.finish(f"食物ID『{food_id}』不存在")
+    hidden, index, _ = context
     _write_food_entry(group_id, index, food_id, name=new_name)
-    _save_index(group_id, index)
+    _save_index(group_id, index, hidden=hidden)
     await supplement_name_cmd.finish(
         f"已为食物（ID：{food_id}）补充名字『{new_name}』✓"
     )
@@ -1055,13 +1236,69 @@ async def handle_hidden_food(
         await hidden_food_cmd.finish("用法：/隐藏 <食物ID>，或引用食物消息后直接发送 /隐藏")
 
     group_id = str(event.group_id)
-    index = _load_index(group_id)
-    if food_id not in index:
+    context = _get_food_entry_context(group_id, food_id)
+    if context is None:
         await hidden_food_cmd.finish(f"食物ID『{food_id}』不存在")
+    hidden, index, entry = context
+    if hidden:
+        await hidden_food_cmd.finish(f"食物（ID：{food_id}）已经是隐藏食物")
 
-    index[food_id]["hidden"] = True
-    _save_index(group_id, index)
+    hidden_index = _load_index(group_id, hidden=True)
+    hidden_images_dir = _get_hidden_images_dir(group_id)
+    hidden_images_dir.mkdir(parents=True, exist_ok=True)
+    src_path = _get_food_image_path(group_id, food_id, entry, hidden=False)
+    dest_path = _get_food_image_path(group_id, food_id, entry, hidden=True)
+    original_entry = dict(entry)
+    try:
+        if src_path.exists():
+            src_path.replace(dest_path)
+        entry["owner"] = _match_hidden_owner(group_id, entry.get("name"))
+        hidden_index[food_id] = entry
+        del index[food_id]
+        _save_index(group_id, index, hidden=False)
+        _save_index(group_id, hidden_index, hidden=True)
+    except Exception:
+        logger.exception("移动隐藏食物失败")
+        index[food_id] = original_entry
+        hidden_index.pop(food_id, None)
+        try:
+            _save_index(group_id, index, hidden=False)
+            _save_index(group_id, hidden_index, hidden=True)
+        except Exception:
+            logger.exception("回滚隐藏食物索引失败")
+        if dest_path.exists() and not src_path.exists():
+            try:
+                dest_path.replace(src_path)
+            except Exception:
+                logger.exception("回滚隐藏食物图片失败")
+        await hidden_food_cmd.finish("移动为隐藏食物失败，请稍后重试")
     await hidden_food_cmd.finish(f"已将食物（ID：{food_id}）设为隐藏食物✓")
+
+
+@up_cmd.handle()
+async def handle_up(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    group_id = str(event.group_id)
+    if not _hidden_owner_mode_enabled(group_id):
+        await up_cmd.finish("本群未启用 hidden owner / up 机制")
+
+    raw = args.extract_plain_text().strip()
+    if not raw:
+        state = _load_hidden_up_state(group_id)
+        current_up = str(state.get("up") or "").strip() or "（空）"
+        guaranteed = "是" if bool(state.get("guaranteed")) else "否"
+        await up_cmd.finish(f"当前 up：{current_up}\n保底：{guaranteed}")
+
+    if raw == "clear":
+        _save_hidden_up_state(group_id, {"up": "", "guaranteed": False})
+        await up_cmd.finish("已清空当前 up✓")
+
+    owners = _load_hidden_owners(group_id)
+    if raw not in owners:
+        choices = "、".join(owners.keys()) if owners else "（无可用 owner）"
+        await up_cmd.finish(f"未知 owner：{raw}\n可用 owner：{choices}")
+
+    _save_hidden_up_state(group_id, {"up": raw, "guaranteed": False})
+    await up_cmd.finish(f"已将当前 up 设置为『{raw}』✓")
 
 
 @tag_food_cmd.handle()
@@ -1090,13 +1327,16 @@ async def handle_tag_food(
         await tag_food_cmd.finish(err)
 
     food_id = ids[0]
-    index = _load_index(group_id)
+    context = _get_food_entry_context(group_id, food_id)
+    if context is None:
+        await tag_food_cmd.finish(f"食物ID『{food_id}』不存在")
+    hidden, index, entry = context
     entry = index[food_id]
     tags = _get_tags(entry)
     if tag not in tags:
         tags.append(tag)
         _write_food_entry(group_id, index, food_id, tags=tags)
-        _save_index(group_id, index)
+        _save_index(group_id, index, hidden=hidden)
     await tag_food_cmd.finish(f"已为食物（ID：{food_id}）添加标签『{tag}』✓")
 
 
@@ -1128,8 +1368,6 @@ def _search_food_candidates(
     normalized_query = _normalize_search_text(query)
     scored: list[tuple[float, str]] = []
     for sid, entry in index.items():
-        if entry.get("hidden"):
-            continue
         best = 0.0
         id_score = _score_field(normalized_query, _normalize_search_text(sid)) * 0.7
         best = max(best, id_score)
@@ -1147,7 +1385,13 @@ def _search_food_candidates(
     return [sid for _, sid in scored[:MAX_EAT_CANDIDATES]]
 
 
-def _build_food_message(group_id: str, food_id: str, index: dict[str, dict]) -> Message | str:
+def _build_food_message(
+    group_id: str,
+    food_id: str,
+    index: dict[str, dict],
+    *,
+    hidden: bool = False,
+) -> Message | str:
     entry = index[food_id]
     name = entry.get("name") or None
     label = _format_food_label(food_id, name)
@@ -1158,11 +1402,49 @@ def _build_food_message(group_id: str, food_id: str, index: dict[str, dict]) -> 
         caption += f" #{rank}"
     if tags:
         caption += "\n标签：" + "、".join(tags)
-    fn = entry.get("filename") or f"{food_id}.png"
-    filepath = _get_images_dir(group_id) / fn
+    filepath = _get_food_image_path(group_id, food_id, entry, hidden=hidden)
     if not filepath.exists():
         return f"食物图片不存在（ID：{food_id}）"
     return MessageSegment.text(caption + "\n") + MessageSegment.image(filepath.read_bytes())
+
+
+async def _send_hidden_food_reveal(
+    bot: Bot,
+    event: GroupMessageEvent,
+    group_id: str,
+    food_id: str,
+    entry: dict,
+) -> None:
+    """发送隐藏食物提示，并在短时间后撤回图片。"""
+    name = entry.get("name") or food_id
+    food_name = name.strip() if isinstance(name, str) and name.strip() else food_id
+    filepath = _get_food_image_path(group_id, food_id, entry, hidden=True)
+    if not filepath.exists():
+        return
+
+    user_id = event.get_user_id()
+    text_msg = (
+        MessageSegment.text("恭喜")
+        + MessageSegment.at(user_id)
+        + MessageSegment.text(f"，请您享用{food_name}：")
+    )
+    await bot.send(event, text_msg)
+    img_resp = await bot.send(event, MessageSegment.image(filepath.read_bytes()))
+
+    async def _recall_image():
+        await asyncio.sleep(5)
+        try:
+            msg_id = None
+            if isinstance(img_resp, dict):
+                msg_id = img_resp.get("message_id") or (img_resp.get("data") or {}).get(
+                    "message_id"
+                )
+            if msg_id is not None:
+                await bot.call_api("delete_msg", message_id=msg_id)
+        except Exception as e:
+            logger.warning(f"撤回隐藏食物图片失败: {e}")
+
+    asyncio.create_task(_recall_image())
 
 
 @eat_cmd.handle()
@@ -1190,7 +1472,7 @@ async def handle_eat(
         await eat_cmd.finish(f"未找到和『{text}』相近的食物")
 
     chosen_id = random.choice(candidates)
-    msg = _build_food_message(group_id, chosen_id, index)
+    msg = _build_food_message(group_id, chosen_id, index, hidden=False)
     await eat_cmd.finish(msg)
 
 
@@ -1207,12 +1489,13 @@ async def handle_feast(
     count = max(1, min(7, count))
 
     index = _load_index(group_id)
+    hidden_index = _load_index(group_id, hidden=True)
     if not index:
         await feast_cmd.finish(
             "本群还没有收集任何食物，使用 /收集食物 [名字] [图片] 来添加吧"
         )
 
-    ids = [sid for sid, e in index.items() if not e.get("hidden")]
+    ids = list(index.keys())
     if not ids:
         await feast_cmd.finish(
             "本群没有普通食物，吃大餐仅从普通食物中抽取（隐藏食物仅能从『吃什么』单抽获得）"
@@ -1223,7 +1506,18 @@ async def handle_feast(
         )
 
     chosen_ids = random.sample(ids, count)
-    images_dir = _get_images_dir(group_id)
+    hidden_reveals: list[str] = []
+    prob = _load_hidden_prob(group_id)
+    hidden_index_changed = False
+    for _ in range(count):
+        hidden_id, prob, changed = _roll_hidden_food_once(group_id, hidden_index, prob)
+        hidden_index_changed = hidden_index_changed or changed
+        if hidden_id:
+            hidden_reveals.append(hidden_id)
+    _save_hidden_prob(group_id, prob)
+    if hidden_index_changed:
+        _save_index(group_id, hidden_index, hidden=True)
+
     parts: list[MessageSegment] = []
     for i, short_id in enumerate(chosen_ids, 1):
         entry = index[short_id]
@@ -1232,77 +1526,64 @@ async def handle_feast(
         ordinal = "第一道菜" if i == 1 else f"第{i}道菜"
         text_seg = MessageSegment.text(f"{ordinal}：{label}\n")
         parts.append(text_seg)
-        fn = entry.get("filename") or f"{short_id}.png"
-        filepath = images_dir / fn
+        filepath = _get_food_image_path(group_id, short_id, entry, hidden=False)
         if filepath.exists():
             parts.append(MessageSegment.image(filepath.read_bytes()))
-    await feast_cmd.finish(Message(parts))
+    await bot.send(event, Message(parts))
+
+    for hidden_id in hidden_reveals:
+        entry = hidden_index.get(hidden_id)
+        if not isinstance(entry, dict):
+            continue
+        await _send_hidden_food_reveal(bot, event, group_id, hidden_id, entry)
+
+    await feast_cmd.finish()
 
 
 async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
     setattr(event, "_yiyin_skip_repetition", True)
     group_id = str(event.group_id)
-    index = _load_index(group_id)
-    if not index:
+    normal_index = _load_index(group_id)
+    hidden_index = _load_index(group_id, hidden=True)
+    if not normal_index and not hidden_index:
         return
 
-    normal_ids = [sid for sid, e in index.items() if not e.get("hidden")]
-    hidden_ids = _get_hidden_food_ids(index)
+    normal_ids = list(normal_index.keys())
+    hidden_ids = _get_hidden_food_ids(hidden_index)
 
-    triggered_hidden = False
+    hidden_pick_id: str | None = None
     if hidden_ids:
         prob = _load_hidden_prob(group_id)
-        if random.randint(1, 100) <= prob:
-            triggered_hidden = True
-            _save_hidden_prob(group_id, 3)
-        else:
-            _save_hidden_prob(group_id, min(100, prob + 1))
+        hidden_pick_id, prob, index_changed = _roll_hidden_food_once(group_id, hidden_index, prob)
+        _save_hidden_prob(group_id, prob)
+        if index_changed:
+            _save_index(group_id, hidden_index, hidden=True)
+    else:
+        index_changed = False
 
-    if triggered_hidden and hidden_ids:
-        short_id, index_changed = _pick_hidden_food_for_random(index)
+    if hidden_pick_id:
+        short_id = hidden_pick_id
         if not short_id:
             return
-        if index_changed:
-            _save_index(group_id, index)
-        entry = index[short_id]
-        name = entry.get("name") or short_id
-        food_name = name.strip() if name and name.strip() else short_id
-        fn = entry.get("filename") or f"{short_id}.png"
-        filepath = _get_images_dir(group_id) / fn
-        if not filepath.exists():
-            return
+        entry = hidden_index[short_id]
 
         await bot.send(event, "是啊，吃什么")
-        user_id = event.get_user_id()
-        text_msg = (
-            MessageSegment.text("恭喜")
-            + MessageSegment.at(user_id)
-            + MessageSegment.text(f"，请您享用{food_name}：")
-        )
-        await bot.send(event, text_msg)
-        img_resp = await bot.send(event, MessageSegment.image(filepath.read_bytes()))
-
-        async def _recall_image():
-            await asyncio.sleep(5)
-            try:
-                msg_id = None
-                if isinstance(img_resp, dict):
-                    msg_id = img_resp.get("message_id") or (img_resp.get("data") or {}).get("message_id")
-                if msg_id is not None:
-                    await bot.call_api("delete_msg", message_id=msg_id)
-            except Exception as e:
-                logger.warning(f"撤回隐藏食物图片失败: {e}")
-
-        asyncio.create_task(_recall_image())
+        await _send_hidden_food_reveal(bot, event, group_id, short_id, entry)
         return
 
-    ids = normal_ids if normal_ids else list(index.keys())
-    short_id = random.choice(ids)
-    entry = index[short_id]
+    if normal_ids:
+        short_id = random.choice(normal_ids)
+        entry = normal_index[short_id]
+        hidden = False
+    elif hidden_ids:
+        short_id = random.choice(hidden_ids)
+        entry = hidden_index[short_id]
+        hidden = True
+    else:
+        return
     name = entry.get("name") or None
     label = _format_food_label(short_id, name)
-    fn = entry.get("filename") or f"{short_id}.png"
-    filepath = _get_images_dir(group_id) / fn
+    filepath = _get_food_image_path(group_id, short_id, entry, hidden=hidden)
     if not filepath.exists():
         return
 

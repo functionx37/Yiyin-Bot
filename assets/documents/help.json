@@ -115,8 +115,8 @@
                 "description": "制作籽岷表情包"
             },
             {
-                "command": "/想 <文本>",
-                "description": "制作若叶睦表情包"
+                "command": "/想 <文本> ((%<角色>)) <文本>",
+                "description": "制作若叶睦等思考表情包"
             },
             {
                 "command": "/男娘 [@群友]",

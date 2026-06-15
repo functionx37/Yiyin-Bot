@@ -2,7 +2,7 @@
 选择回应（react 子模块）
 - 匹配以 # 开头且包含「还是」的多选一结构
 - 匹配以 # 开头的「句子1 + 词 + 不 + 相同词 + 句子2」结构
-- 支持从 assets/documents/pick_special.json 读取特判问答
+- 支持从 config/pick_special.json 读取特判问答
 - 以最长相同前后缀作为词
 - 引用原消息后按概率回复
 """
@@ -18,7 +18,7 @@ from nonebot.adapters.onebot.v11 import GroupMessageEvent, Message, MessageSegme
 from nonebot.rule import Rule
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-SPECIAL_RESPONSES_PATH = PROJECT_ROOT / "assets" / "documents" / "pick_special.json"
+SPECIAL_RESPONSES_PATH = PROJECT_ROOT / "config" / "pick_special.json"
 
 _special_responses_cache: dict[str, str] | None = None
 

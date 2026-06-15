@@ -420,7 +420,6 @@ async def handle_emoji_collect_food(
         image_urls,
         None,
         name_only_with_llm=True,
-        auto_tag_with_llm=True,
         log_prefix="贴表情收集食物自动命名",
     )
     if not result:

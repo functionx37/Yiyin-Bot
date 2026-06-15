@@ -1,7 +1,7 @@
 """
 自动食物收集（food 子模块，隐藏功能，需 /启用 自动食物收集）
 - 对启用了该功能的群聊，自动识别每条消息中的食物图片
-- 调用 LLM 判断图片是否为食物 → 自动收集到食物图鉴并提示（名称仅供参考，可用 /补充名字 调整）
+- 调用 LLM 判断图片是否为食物，并给出简短名称后自动收集到食物图鉴（名称仅供参考，可用 /补充名字 调整）
 - 常关，需群内 /启用 自动食物收集 后生效
 """
 
@@ -14,8 +14,8 @@ from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
 
-from yiyin.food import add_food_from_image_url, get_group_labels
-from yiyin.food.llm_recognition import recognize_food_with_labels_from_image_bytes
+from yiyin.food import add_food_from_image_url
+from yiyin.food.llm_recognition import recognize_food_from_image_bytes
 from yiyin.image_utils import maybe_compress_large_png
 from yiyin.toggle import is_feature_enabled_async
 
@@ -157,19 +157,17 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
     if not image_url or not image_bytes:
         return
 
-    result = await recognize_food_with_labels_from_image_bytes(
+    rec_type, auto_name = await recognize_food_from_image_bytes(
         image_bytes,
         content_type,
-        label_pool=get_group_labels(group_id),
         log_prefix="自动食物收集",
     )
 
-    if result.get("type") == "FOOD":
+    if rec_type == "FOOD":
         save_result = await add_food_from_image_url(
             group_id,
             image_url,
-            result.get("name") if isinstance(result.get("name"), str) else None,
-            tags=result.get("tags") if isinstance(result.get("tags"), list) else [],
+            auto_name,
         )
         if save_result:
             reply_seg = MessageSegment.reply(event.message_id)

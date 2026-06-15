@@ -63,8 +63,8 @@ _COMMON_TEMPLATE = _TemplateConfig(
     bubble_width_ratio=0.43,
     bubble_height_ratio=0.215,
     bubble_padding_ratio=0.02,
-    center_offset_x_ratio=0.0,
-    center_offset_y_ratio=0.01,
+    center_offset_x_ratio=0.008,
+    center_offset_y_ratio=0.035,
 )
 
 
@@ -314,7 +314,7 @@ async def handle_xiang(bot: Bot, event: MessageEvent, args: Message = CommandArg
     try:
         _, template = _resolve_template(alias)
     except KeyError:
-        fallback_notice = f"不存在的模板：{alias}"
+        fallback_notice = f"不存在模板：{alias}"
         _, template = _resolve_template("default")
     except FileNotFoundError as e:
         await xiang_cmd.finish(str(e))

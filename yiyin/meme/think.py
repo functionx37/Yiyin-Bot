@@ -31,6 +31,7 @@ FONT_PATH = _PROJECT_ROOT / "assets" / "fonts" / "msyh.ttc"
 _FONT_SIZE_MIN = 14
 _FONT_SIZE_MAX = 96
 _LINE_SPACING = 1.2
+_IGNORABLE_EDGE_CHARS = "\u200b\u200c\u200d\ufeff\u2060"
 
 
 @dataclass(frozen=True)
@@ -274,13 +275,27 @@ def _build_forward_nodes(bot_name: str, bot_uin: str, items: list[str]) -> list[
     ]
 
 
+def _normalize_xiang_arg_text(text: str) -> str:
+    cleaned = text
+    while True:
+        updated = cleaned.strip().strip(_IGNORABLE_EDGE_CHARS)
+        if updated == cleaned:
+            return cleaned
+        cleaned = updated
+
+
 def _parse_xiang_args(raw: str) -> tuple[str | None, str]:
-    stripped = raw.strip()
+    stripped = _normalize_xiang_arg_text(raw)
     if stripped == "list":
         return "LIST", ""
-    if stripped.startswith("%"):
-        alias, _, text = stripped[1:].partition(" ")
-        return alias.strip(), text.strip()
+    if stripped.startswith(("%", "％")):
+        payload = _normalize_xiang_arg_text(stripped[1:])
+        if not payload:
+            return "", ""
+        parts = payload.split(maxsplit=1)
+        alias = _normalize_xiang_arg_text(parts[0])
+        text = _normalize_xiang_arg_text(parts[1]) if len(parts) > 1 else ""
+        return alias, text
     return None, stripped
 
 

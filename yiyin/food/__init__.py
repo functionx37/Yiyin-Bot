@@ -55,6 +55,7 @@ RANK_ALIASES = {
 VALID_RANKS = {"夯", "人上人", "NPC", "拉"}
 MAX_EAT_CANDIDATES = 8
 EAT_SCORE_THRESHOLD = 0.42
+MAX_FEAST_COUNT = 10
 _COLLECT_COMMAND_RE = re.compile(r"[/.\!！](?P<command>收集隐藏食物|收集食物)(?=\s|$)")
 _COLLECT_RANK_RE = re.compile(r"(?:^|\s)#(夯爆了|夯|拉完了|拉|NPC|npc|人上人)(?=\s|$)")
 _COLLECT_TAGS_RE = re.compile(r"%(（[^）]+）(?:（[^）]+）)*)")
@@ -1680,7 +1681,7 @@ async def handle_feast(
         count = int(text) if text else 3
     except ValueError:
         count = 3
-    count = max(1, min(7, count))
+    count = max(1, min(MAX_FEAST_COUNT, count))
 
     index = _load_index(group_id)
     if not index:

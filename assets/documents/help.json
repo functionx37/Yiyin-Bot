@@ -119,6 +119,10 @@
                 "description": "制作若叶睦等思考表情包"
             },
             {
+                "command": "/盐巴 <文本>",
+                "description": "制作盐巴震惊表情包"
+            },
+            {
                 "command": "/男娘 [@群友]",
                 "description": "将男娘标识加到群友头像上"
             },

@@ -4,6 +4,8 @@ NoneBot2 贴表情 / 发表情插件
 - 命令：/贴 <ID/别名> [引用]       — 给引用的消息贴上指定表情
 - 命令：/贴<数字>个 [引用]          — 给引用的消息随机贴上指定个数的表情
 - 命令：/贴 <起始ID~结束ID> [引用]   — 给引用的消息依次贴上区间内所有表情
+- 命令：/id <QQ表情>               — 输出消息中 QQ 表情段的 ID，多个用空格分隔
+- 命令：/id [引用]                 — 输出被引用消息已被贴上的表情 ID，多个用空格分隔
 - 命令：/发 <ID/别名>              — 发送对应ID的QQ系统表情
 - 命令：/发 随机                   — 随机发送一个QQ系统表情
 - 命令：/贴表情别名 <ID> <别名>     — 绑定表情别名
@@ -43,6 +45,14 @@ EMOJI_IMG_DIR = PROJECT_ROOT / "assets" / "images" / "emoji_list"
 MAX_RANDOM_COUNT = 20
 _RANDOM_RE = re.compile(r"^(\d+)个$")
 _ID_RANGE_RE = re.compile(r"^(\d+)\s*[~～]\s*(\d+)$")
+_EMOJI_ID_KEYS = ("emoji_id", "emojiId", "emojiID")
+_EMOJI_LIST_KEYS = (
+    "emoji_like_list",
+    "emojiLikeList",
+    "emoji_likes",
+    "emojiLikes",
+    "likes",
+)
 
 
 # ==================== 工具函数 ====================
@@ -206,6 +216,90 @@ def _chunk_ids(ids: list[int], size: int = 5) -> str:
     for i in range(0, len(ids), size):
         lines.append(" ".join(str(eid) for eid in ids[i : i + size]))
     return "\n".join(lines)
+
+
+def _unique_str_ids(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _extract_face_ids(message: Message) -> list[str]:
+    ids: list[str] = []
+    for seg in message:
+        if seg.type != "face":
+            continue
+        face_id = seg.data.get("id")
+        if isinstance(face_id, str) and face_id.isdigit():
+            ids.append(face_id)
+    return ids
+
+
+def _collect_emoji_like_ids(raw: Any) -> list[str]:
+    ids: list[str] = []
+
+    def visit(obj: Any) -> None:
+        if isinstance(obj, list):
+            for item in obj:
+                visit(item)
+            return
+
+        if not isinstance(obj, dict):
+            return
+
+        for key in _EMOJI_ID_KEYS:
+            value = obj.get(key)
+            if isinstance(value, int):
+                ids.append(str(value))
+            elif isinstance(value, str) and value.isdigit():
+                ids.append(value)
+
+        for key in _EMOJI_LIST_KEYS:
+            if key in obj:
+                visit(obj[key])
+
+        for key in ("data", "result"):
+            if key in obj:
+                visit(obj[key])
+
+        if obj and all(isinstance(key, str) and key.isdigit() for key in obj):
+            ids.extend(key for key in obj if key.isdigit())
+
+        for key, value in obj.items():
+            if key in (*_EMOJI_ID_KEYS, *_EMOJI_LIST_KEYS, "data", "result"):
+                continue
+            if "emoji" not in key.lower():
+                continue
+            visit(value)
+
+    visit(raw)
+    return _unique_str_ids(ids)
+
+
+async def _get_message_emoji_like_ids(bot: Bot, message_id: int) -> tuple[list[str], bool]:
+    actions = ("get_emoji_likes", "get_msg_emoji_likes", "get_msg_emoji_like_list")
+    params_list = ({"message_id": message_id}, {"message_id": str(message_id)})
+
+    for action in actions:
+        for params in params_list:
+            try:
+                result = await bot.call_api(action, **params)
+            except Exception:
+                continue
+            return _collect_emoji_like_ids(result), True
+
+    try:
+        msg_data = await bot.get_msg(message_id=message_id)
+    except Exception:
+        return [], False
+
+    ids = _collect_emoji_like_ids(msg_data)
+    return ids, bool(ids)
 
 
 def _apply_add_ids(config: dict[str, Any], ids: list[int]) -> tuple[list[int], list[int]]:
@@ -463,6 +557,7 @@ async def handle_auto_collect_emoji_id(
 list_cmd = on_command("贴表情列表", priority=10, block=True)
 stick_cmd = on_command("贴", priority=10, block=True)
 hash_stick_matcher = on_message(Rule(_is_hash_stick), priority=10, block=True)
+id_cmd = on_command("id", priority=10, block=True)
 send_cmd = on_command("发", priority=10, block=True)
 alias_cmd = on_command("贴表情别名", priority=10, block=True)
 add_cmd = on_command("贴表情新增", priority=10, block=True, permission=SUPERUSER)
@@ -611,6 +706,28 @@ async def handle_send(bot: Bot, event: GroupMessageEvent, args: Message = Comman
         await bot.send(event, Message(MessageSegment.face(emoji_id)))
     except Exception:
         await send_cmd.finish(f"发送失败，ID {emoji_id} 对应的表情不存在")
+
+
+# ==================== /id ====================
+@id_cmd.handle()
+async def handle_emoji_id(
+    bot: Bot,
+    event: GroupMessageEvent,
+    args: Message = CommandArg(),
+):
+    face_ids = _extract_face_ids(args)
+    if face_ids:
+        await id_cmd.finish(" ".join(face_ids))
+
+    if not event.reply:
+        await id_cmd.finish("用法：/id <QQ表情>，或引用一条消息后发送 /id")
+
+    emoji_ids, queried = await _get_message_emoji_like_ids(bot, event.reply.message_id)
+    if emoji_ids:
+        await id_cmd.finish(" ".join(emoji_ids))
+    if queried:
+        await id_cmd.finish("该消息还没有被贴表情")
+    await id_cmd.finish("查询失败，当前协议端可能不支持获取消息贴表情列表")
 
 
 # ==================== /贴表情别名 ====================

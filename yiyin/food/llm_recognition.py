@@ -87,6 +87,7 @@ async def recognize_food_from_image_bytes(
                 model=IMAGE_RECOG_MODEL,
                 temperature=0.1,
                 max_tokens=64,
+                top_p=None,
                 timeout=90,
                 raise_on_error=True,
             )
@@ -149,6 +150,7 @@ async def suggest_food_name_from_image_bytes(
                 model=IMAGE_RECOG_MODEL,
                 temperature=0.1,
                 max_tokens=32,
+                top_p=None,
                 timeout=90,
                 raise_on_error=True,
             )

@@ -246,7 +246,7 @@ async def chat_completion(
     model: str = "claude-haiku-4-5-20251001",
     temperature: float = 0.8,
     max_tokens: int = 256,
-    top_p: float = 0.9,
+    top_p: float | None = 0.9,
     timeout: float = 30,
     raise_on_error: bool = False,
     **kwargs: Any,
@@ -263,7 +263,7 @@ async def chat_completion(
         model: 模型名称（识图需用 Vision 模型，如 gpt-4o-mini、gpt-4o）
         temperature: 采样温度
         max_tokens: 最大生成 token 数
-        top_p: 核采样概率
+        top_p: 核采样概率；传入 None 时不发送该参数
         timeout: 请求超时（秒）
 
     Returns:
@@ -296,10 +296,11 @@ async def chat_completion(
         "messages": prepared_messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
-        "top_p": top_p,
         "stream": False,
         **kwargs,
     }
+    if top_p is not None:
+        payload["top_p"] = top_p
 
     headers = {
         "Authorization": f"Bearer {api_key}",

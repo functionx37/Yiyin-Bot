@@ -4,7 +4,7 @@ NoneBot2 群友语录插件
 - 命令：/新增别名 <已有昵称> <别名>（若两者均存在，则把后者当别名并合并其语录到前者）
 - 命令：/群友列表
 - 命令：/上传 <群友昵称> [图片]（支持多张图片含引用，依次处理；出错回滚）
-- 命令：/截图上传 <群友昵称> [引用消息]
+- 命令：/截图上传 [群友昵称] [引用消息]（首次指定昵称后，后续可省略）
 - 命令：/查看 <群友昵称>（以合并转发发送该群友全部语录，格式『ID』）
 - 命令：/随机群友 [昵称]（等概率随机一个有语录的群友再随机一条；指定昵称则从该群友语录中随机）
 - 命令：/随机语录（从本群全部语录中随机抽取一条）
@@ -68,6 +68,35 @@ def _get_aliases_file(group_id: str) -> Path:
 def _get_deleted_members_file(group_id: str) -> Path:
     """获取已删除群友列表文件路径"""
     return _get_group_dir(group_id) / "deleted_members.json"
+
+
+def _get_screenshot_upload_cache_file(group_id: str) -> Path:
+    """获取截图上传的 QQ 与群友主昵称映射缓存文件路径"""
+    return _get_group_dir(group_id) / "screenshot_upload_cache.json"
+
+
+def _load_screenshot_upload_cache(group_id: str) -> dict[str, str]:
+    """加载截图上传缓存 {QQ号: 群友主昵称}。"""
+    cache_file = _get_screenshot_upload_cache_file(group_id)
+    if not cache_file.exists():
+        return {}
+    with open(cache_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(qq): name
+        for qq, name in data.items()
+        if isinstance(qq, (str, int)) and isinstance(name, str) and name
+    }
+
+
+def _save_screenshot_upload_cache(group_id: str, cache: dict[str, str]) -> None:
+    """保存截图上传的 QQ 与群友主昵称映射缓存。"""
+    cache_file = _get_screenshot_upload_cache_file(group_id)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache_file, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
 def _load_deleted_members(group_id: str) -> set[str]:
@@ -729,7 +758,7 @@ async def handle_screenshot_upload(
     from .draw import async_generate_chat_screenshot
 
     name = args.extract_plain_text().strip()
-    if not name:
+    if not name and not event.reply:
         await screenshot_upload_cmd.finish(
             "请输入群友昵称并引用一条消息，例如：/截图上传 小明（引用消息）"
         )
@@ -739,12 +768,19 @@ async def handle_screenshot_upload(
             "请引用一条消息来生成截图，例如回复某条消息并输入：/截图上传 小明"
         )
 
+    sender_id = event.reply.sender.user_id
+    group_id = str(event.group_id)
+
+    if not name:
+        name = _load_screenshot_upload_cache(group_id).get(str(sender_id), "")
+        if not name:
+            await screenshot_upload_cmd.finish(
+                "请输入群友昵称并引用一条消息，例如：/截图上传 小明（引用消息）"
+            )
+
     reply_text = await _extract_reply_text(bot, event)
     if not reply_text:
         await screenshot_upload_cmd.finish("引用的消息没有文字内容，无法生成截图")
-
-    sender_id = event.reply.sender.user_id
-    group_id = str(event.group_id)
 
     try:
         member_info = await bot.get_group_member_info(
@@ -802,6 +838,9 @@ async def handle_screenshot_upload(
         filepath = image_dir / _quote_filename(short_id, index[short_id])
         filepath.write_bytes(screenshot_bytes)
         _save_index(group_id, index)
+        cache = _load_screenshot_upload_cache(group_id)
+        cache[str(sender_id)] = canonical
+        _save_screenshot_upload_cache(group_id, cache)
     except Exception:
         logger.exception("保存截图失败，回滚")
         (image_dir / _quote_filename(short_id)).unlink(missing_ok=True)

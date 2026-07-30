@@ -65,7 +65,7 @@ class VayuGame:
     participant_order: dict[int, int] = field(default_factory=dict)
     used_record_ids: set[int] = field(default_factory=set)
     previous_answers: frozenset[str] = field(default_factory=frozenset)
-    wrong_answered_users: set[int] = field(default_factory=set)
+    current_round_wrong_users: set[int] = field(default_factory=set)
     accepting_answers: bool = False
     read_complete_at: float | None = None
     broadcaster_task: asyncio.Task | None = None
@@ -408,6 +408,7 @@ def _set_round(game: VayuGame, record: VayuRecord, round_number: int) -> None:
     game.chunks = _build_chunks(record)
     game.current_round = round_number
     game.used_record_ids.add(record.id)
+    game.current_round_wrong_users.clear()
     game.accepting_answers = False
     game.read_complete_at = None
     game.broadcaster_task = None
@@ -445,7 +446,7 @@ def _settle_round_locked(
     if winner_id is not None:
         score = (
             CORRECT_AFTER_WRONG_SCORE
-            if winner_id in game.wrong_answered_users
+            if winner_id in game.current_round_wrong_users
             else CORRECT_SCORE
         )
         _change_score(
@@ -648,7 +649,7 @@ async def handle_answer(bot: Bot, event: MessageEvent):
         else:
             _remember_participant(game, event.user_id, _display_name(event))
             game.scores.setdefault(event.user_id, 0)
-            game.wrong_answered_users.add(event.user_id)
+            game.current_round_wrong_users.add(event.user_id)
 
     if correct:
         await _dispatch_round_settlement(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import json
 import random
 import time
 import unicodedata
@@ -24,6 +25,7 @@ from nonebot.rule import Rule
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 VAYU_CSV_PATH = PROJECT_ROOT / "assets" / "documents" / "vayu.csv"
+VAYU_DATA_DIR = PROJECT_ROOT / "data" / "vayu"
 
 CHUNK_INTERVAL_SECONDS = 10
 READ_ANSWER_DELAY_SECONDS = 30
@@ -33,6 +35,10 @@ PUNCT_BIAS = 1
 ANSWER_PREFIX = "%"
 SESSION_ROUNDS = 5
 CORRECT_SCORE = 2
+CORRECT_AFTER_WRONG_SCORE = 1
+LEADERBOARD_FORWARD_THRESHOLD = 10
+LEADERBOARD_NODE_SIZE = 10
+LEADERBOARD_LIMIT = 100
 
 BAD_END_CATEGORIES = {"Ps", "Pi"}
 BAD_START_CATEGORIES = {"Pe", "Pf", "Po"}
@@ -59,6 +65,7 @@ class VayuGame:
     participant_order: dict[int, int] = field(default_factory=dict)
     used_record_ids: set[int] = field(default_factory=set)
     previous_answers: frozenset[str] = field(default_factory=frozenset)
+    wrong_answered_users: set[int] = field(default_factory=set)
     accepting_answers: bool = False
     read_complete_at: float | None = None
     broadcaster_task: asyncio.Task | None = None
@@ -107,6 +114,54 @@ def _group_lock(group_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _GROUP_LOCKS[group_id] = lock
     return lock
+
+
+def _get_score_file(group_id: int) -> Path:
+    """获取群随蓝累计分数文件路径。"""
+    return VAYU_DATA_DIR / f"{group_id}.json"
+
+
+def _load_group_scores(group_id: int) -> dict[int, int]:
+    """加载群随蓝累计分数 {QQ号: 分数}。"""
+    score_file = _get_score_file(group_id)
+    if not score_file.exists():
+        return {}
+    try:
+        with open(score_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        logger.exception("读取随蓝累计分数失败: {}", score_file)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+
+    scores: dict[int, int] = {}
+    for user_id, score in data.items():
+        try:
+            scores[int(user_id)] = int(score)
+        except (TypeError, ValueError):
+            continue
+    return scores
+
+
+def _save_group_scores(group_id: int, scores: dict[int, int]) -> None:
+    """保存群随蓝累计分数。"""
+    score_file = _get_score_file(group_id)
+    score_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(score_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {str(user_id): score for user_id, score in scores.items()},
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
+def _add_group_score(group_id: int, user_id: int, delta: int) -> None:
+    """向群随蓝累计分数增加本次答对所得分数。"""
+    scores = _load_group_scores(group_id)
+    scores[user_id] = scores.get(user_id, 0) + delta
+    _save_group_scores(group_id, scores)
 
 
 def _parse_session_rounds(args_text: str) -> tuple[int | None, str | None]:
@@ -312,12 +367,14 @@ def _is_previous_round_answer(game: VayuGame, answer: str) -> bool:
     return answer in game.previous_answers
 
 
-def _build_round_result_message(record: VayuRecord, winner_id: int | None = None):
+def _build_round_result_message(
+    record: VayuRecord, winner_id: int | None = None, score: int = CORRECT_SCORE
+):
     summary = f"题面：{_question_surface(record)}\n题底：{record.answer}"
     if winner_id is None:
         return summary
     return MessageSegment.at(winner_id) + MessageSegment.text(
-        f"✔️回答正确！{_format_score_delta(CORRECT_SCORE)}分\n{summary}"
+        f"✔️回答正确！{_format_score_delta(score)}分\n{summary}"
     )
 
 
@@ -381,18 +438,30 @@ def _settle_round_locked(
     winner_name: str | None = None,
 ) -> tuple[object, bool, str | None]:
     record = game.record
+    score = 0
     game.previous_answers = _accepted_answers(record.answer)
     _cancel_round_tasks(game)
 
     if winner_id is not None:
+        score = (
+            CORRECT_AFTER_WRONG_SCORE
+            if winner_id in game.wrong_answered_users
+            else CORRECT_SCORE
+        )
         _change_score(
             game,
             user_id=winner_id,
             name=winner_name or str(winner_id),
-            delta=CORRECT_SCORE,
+            delta=score,
         )
+        try:
+            _add_group_score(game.group_id, winner_id, score)
+        except OSError:
+            logger.exception("保存随蓝累计分数失败: {}", game.group_id)
 
-    result_message = _build_round_result_message(record, winner_id=winner_id)
+    result_message = _build_round_result_message(
+        record, winner_id=winner_id, score=score if winner_id is not None else 0
+    )
     if game.current_round >= game.total_rounds:
         return result_message, False, _build_scoreboard_message(game)
 
@@ -512,6 +581,8 @@ def _answer_rule(event: MessageEvent) -> bool:
 vayu_cmd = on_command("随蓝", priority=10, block=True)
 answer_matcher = on_message(rule=Rule(_answer_rule), priority=10, block=True)
 reveal_cmd = on_command("看答案", priority=10, block=True)
+leaderboard_cmd = on_command("随蓝排行榜", priority=10, block=True)
+end_vayu_cmd = on_command("结束随蓝", priority=10, block=True)
 
 
 @vayu_cmd.handle()
@@ -577,6 +648,7 @@ async def handle_answer(bot: Bot, event: MessageEvent):
         else:
             _remember_participant(game, event.user_id, _display_name(event))
             game.scores.setdefault(event.user_id, 0)
+            game.wrong_answered_users.add(event.user_id)
 
     if correct:
         await _dispatch_round_settlement(
@@ -595,6 +667,83 @@ async def handle_answer(bot: Bot, event: MessageEvent):
         group_id=event.group_id,
         message=_build_wrong_answer_message(event.user_id),
     )
+
+
+async def _qq_nickname(bot: Bot, user_id: int) -> str:
+    """获取 QQ 昵称，不使用群名片。"""
+    try:
+        info = await bot.get_stranger_info(user_id=user_id)
+        nickname = info.get("nickname")
+        if isinstance(nickname, str) and nickname.strip():
+            return _sanitize_display_name(nickname)
+    except Exception:
+        logger.exception("获取随蓝排行榜 QQ 昵称失败: {}", user_id)
+    return str(user_id)
+
+
+async def _build_leaderboard_lines(bot: Bot, group_id: int) -> list[str]:
+    scores = _load_group_scores(group_id)
+    ranking = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[
+        :LEADERBOARD_LIMIT
+    ]
+    lines: list[str] = []
+    for user_id, score in ranking:
+        nickname = await _qq_nickname(bot, user_id)
+        lines.append(f"{nickname}：{score}分")
+    return lines
+
+
+@leaderboard_cmd.handle()
+async def handle_leaderboard(bot: Bot, event: MessageEvent):
+    if not isinstance(event, GroupMessageEvent):
+        return
+
+    lines = await _build_leaderboard_lines(bot, event.group_id)
+    if not lines:
+        await leaderboard_cmd.finish("本群还没有随蓝成绩")
+
+    if len(lines) <= LEADERBOARD_FORWARD_THRESHOLD:
+        await leaderboard_cmd.finish("\n".join(lines))
+
+    try:
+        bot_info = await bot.get_login_info()
+        bot_name = bot_info.get("nickname", "YiyinBot")
+    except Exception:
+        bot_name = "YiyinBot"
+
+    nodes = []
+    for start in range(0, len(lines), LEADERBOARD_NODE_SIZE):
+        nodes.append(
+            {
+                "type": "node",
+                "data": {
+                    "name": bot_name,
+                    "uin": str(bot.self_id),
+                    "content": Message(
+                        MessageSegment.text(
+                            "\n".join(lines[start : start + LEADERBOARD_NODE_SIZE])
+                        )
+                    ),
+                },
+            }
+        )
+    await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
+
+
+@end_vayu_cmd.handle()
+async def handle_end_vayu(bot: Bot, event: MessageEvent):
+    if not isinstance(event, GroupMessageEvent):
+        return
+
+    async with _group_lock(event.group_id):
+        game = _GROUP_GAMES.get(event.group_id)
+        if game is not None:
+            _remove_game(event.group_id, game)
+
+    if game is None:
+        await end_vayu_cmd.finish("本群当前没有正在进行的随蓝游戏")
+
+    await end_vayu_cmd.finish("本局随蓝已结束")
 
 
 @reveal_cmd.handle()

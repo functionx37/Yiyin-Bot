@@ -1,7 +1,7 @@
 """
 否定回应（react 子模块，隐藏功能，需 /启用 否定）
 - 当群友消息以 但/但是 开头时，有 50% 概率回复：
-  我们不认为<句子>,您囍疯。
+  我们不认为<句子>，您囍疯。
 - 默认关闭，需群内 /启用 否定 后生效
 """
 
@@ -95,4 +95,4 @@ async def handle_deny(event: GroupMessageEvent):
         return
 
     swapped_sentence = _swap_person_pronouns(sentence)
-    await deny_matcher.finish(f"我们不认为{swapped_sentence},您囍疯。")
+    await deny_matcher.finish(f"我们不认为{swapped_sentence}，您囍疯。")

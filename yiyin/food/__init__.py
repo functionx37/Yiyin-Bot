@@ -1602,7 +1602,8 @@ def _build_food_message(
     filepath = _get_food_image_path(group_id, food_id, entry, hidden=hidden)
     if not filepath.exists():
         return f"食物图片不存在（ID：{food_id}）"
-    return MessageSegment.text(caption + "\n") + MessageSegment.image(filepath.read_bytes())
+    # 直接交给 OneBot/NapCat 读取本地文件，避免在 Bot 进程中把整张图片读入并转 Base64。
+    return MessageSegment.text(caption + "\n") + MessageSegment.image(filepath)
 
 
 async def _send_hidden_food_reveal(
@@ -1626,7 +1627,8 @@ async def _send_hidden_food_reveal(
         + MessageSegment.text(f"，请您享用{food_name}：")
     )
     await bot.send(event, text_msg)
-    img_resp = await bot.send(event, MessageSegment.image(filepath.read_bytes()))
+    # 使用本地路径发送，避免 Bot 侧复制整张图片并生成 Base64 字符串。
+    img_resp = await bot.send(event, MessageSegment.image(filepath))
 
     async def _recall_image():
         await asyncio.sleep(5)
@@ -1782,7 +1784,7 @@ async def _handle_what_to_eat(bot: Bot, event: GroupMessageEvent) -> None:
         MessageSegment.text("请你吃")
         + MessageSegment.text(label)
         + MessageSegment.text("怎么样？\n")
-        + MessageSegment.image(filepath.read_bytes())
+        + MessageSegment.image(filepath)
     )
     await bot.send(event, msg)
 

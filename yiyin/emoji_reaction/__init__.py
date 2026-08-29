@@ -5,7 +5,7 @@ NoneBot2 贴表情 / 发表情插件
 - 命令：/贴<数字>个 [引用]          — 给引用的消息随机贴上指定个数的表情
 - 命令：/贴 <起始ID~结束ID> [引用]   — 给引用的消息依次贴上区间内所有表情
 - 命令：/id <QQ表情>               — 输出消息中 QQ 表情段的 ID，多个用空格分隔
-- 命令：/id [引用]                 — 输出被引用消息已被贴上的表情 ID，多个用空格分隔
+- 命令：/id [引用]                 — 引用单个 QQ 表情时输出其 ID，否则输出被引用消息已被贴上的表情 ID
 - 命令：/发 <ID/别名>              — 发送对应ID的QQ系统表情
 - 命令：/发 随机                   — 随机发送一个QQ系统表情
 - 命令：/贴表情别名 <ID> <别名>     — 绑定表情别名
@@ -238,6 +238,27 @@ def _extract_face_ids(message: Message) -> list[str]:
         if isinstance(face_id, str) and face_id.isdigit():
             ids.append(face_id)
     return ids
+
+
+def _extract_single_face_id(message: Message | None) -> str | None:
+    """提取仅包含一个 QQ 表情段的消息 ID。
+
+    引用消息可能同时包含文字、图片等其他消息段；只有消息内容恰好
+    是单个 ``face`` 段时，才将其视为待查询的 QQ 表情本身。
+    """
+    if message is None or len(message) != 1:
+        return None
+
+    segment = message[0]
+    if segment.type != "face":
+        return None
+
+    face_id = segment.data.get("id")
+    if isinstance(face_id, int) and face_id >= 0:
+        return str(face_id)
+    if isinstance(face_id, str) and face_id.isdigit():
+        return face_id
+    return None
 
 
 def _collect_emoji_like_ids(raw: Any) -> list[str]:
@@ -715,19 +736,27 @@ async def handle_emoji_id(
     event: GroupMessageEvent,
     args: Message = CommandArg(),
 ):
+    # 引用消息为单个纯 QQ 表情时，直接返回该表情自身的 ID；否则继续
+    # 查询被引用消息收到的贴表情列表。
+    if event.reply:
+        quoted_face_id = _extract_single_face_id(event.reply.message)
+        if quoted_face_id is not None:
+            await id_cmd.finish(quoted_face_id)
+
+        emoji_ids, queried = await _get_message_emoji_like_ids(
+            bot, event.reply.message_id
+        )
+        if emoji_ids:
+            await id_cmd.finish(" ".join(emoji_ids))
+        if queried:
+            await id_cmd.finish("该消息还没有被贴表情")
+        await id_cmd.finish("查询失败，当前协议端可能不支持获取消息贴表情列表")
+
     face_ids = _extract_face_ids(args)
     if face_ids:
         await id_cmd.finish(" ".join(face_ids))
 
-    if not event.reply:
-        await id_cmd.finish("用法：/id <QQ表情>，或引用一条消息后发送 /id")
-
-    emoji_ids, queried = await _get_message_emoji_like_ids(bot, event.reply.message_id)
-    if emoji_ids:
-        await id_cmd.finish(" ".join(emoji_ids))
-    if queried:
-        await id_cmd.finish("该消息还没有被贴表情")
-    await id_cmd.finish("查询失败，当前协议端可能不支持获取消息贴表情列表")
+    await id_cmd.finish("用法：/id <QQ表情>，或引用一条消息后发送 /id")
 
 
 # ==================== /贴表情别名 ====================

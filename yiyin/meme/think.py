@@ -44,6 +44,8 @@ class _TemplateConfig:
     bubble_padding_ratio: float
     center_offset_x_ratio: float
     center_offset_y_ratio: float
+    # 字号以 600×600 模板为基准缩放，旧模板保持 1.0。
+    font_size_scale: float = 1.0
 
 
 _DEFAULT_TEMPLATE = _TemplateConfig(
@@ -67,6 +69,13 @@ _COMMON_TEMPLATE = _TemplateConfig(
     center_offset_x_ratio=0.02,
     center_offset_y_ratio=0.075,
 )
+
+# 15、16 是同一构图的高分辨率和缩略图版本。气泡坐标继续使用比例，
+# 只将字号上下限按图片尺寸缩放，保证文字在气泡中的视觉比例一致。
+_SCALED_TEMPLATE_SCALES = {
+    "15.jpg": 1254 / 600,
+    "16.jpg": 200 / 600,
+}
 
 
 def _load_template_map() -> dict[str, str]:
@@ -182,6 +191,7 @@ def _resolve_template(alias: str | None) -> tuple[str, _TemplateConfig]:
     image_path = THINK_DIR / filename
     if filename == "0.jpg":
         return key, _DEFAULT_TEMPLATE
+    font_size_scale = _SCALED_TEMPLATE_SCALES.get(filename, 1.0)
     return key, _COMMON_TEMPLATE.__class__(
         image_path=image_path,
         bubble_left_ratio=_COMMON_TEMPLATE.bubble_left_ratio,
@@ -191,6 +201,7 @@ def _resolve_template(alias: str | None) -> tuple[str, _TemplateConfig]:
         bubble_padding_ratio=_COMMON_TEMPLATE.bubble_padding_ratio,
         center_offset_x_ratio=_COMMON_TEMPLATE.center_offset_x_ratio,
         center_offset_y_ratio=_COMMON_TEMPLATE.center_offset_y_ratio,
+        font_size_scale=font_size_scale,
     )
 
 
@@ -212,11 +223,14 @@ def _draw_template(text: str, template: _TemplateConfig) -> bytes:
         base.save(buf, format="PNG")
         return buf.getvalue()
 
-    font_size = _FONT_SIZE_MAX
+    # 以 600×600 模板的字号范围为基准，针对不同分辨率按比例调整。
+    scaled_font_min = max(1, round(_FONT_SIZE_MIN * template.font_size_scale))
+    scaled_font_max = max(scaled_font_min, round(_FONT_SIZE_MAX * template.font_size_scale))
+    font_size = scaled_font_max
     lines: list[str] = []
     font = _get_font(font_size)
 
-    for size in range(_FONT_SIZE_MAX, _FONT_SIZE_MIN - 1, -2):
+    for size in range(scaled_font_max, scaled_font_min - 1, -2):
         font = _get_font(size)
         lines = _wrap_text(text, font, bubble_w)
         ascent, descent = font.getmetrics()
@@ -227,7 +241,7 @@ def _draw_template(text: str, template: _TemplateConfig) -> bytes:
             font_size = size
             break
     else:
-        font_size = _FONT_SIZE_MIN
+        font_size = scaled_font_min
         font = _get_font(font_size)
         lines = _wrap_text(text, font, bubble_w)
 

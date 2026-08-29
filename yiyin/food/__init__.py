@@ -1224,6 +1224,8 @@ async def _do_collect_food(
         rank=rank,
         tags=tags,
         hidden=hidden,
+        # 用户主动收集时，默认图片就是待收录食物，直接要求模型命名。
+        name_only_with_llm=True,
         log_prefix="手动收集食物自动命名",
     )
     if not result:

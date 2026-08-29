@@ -197,6 +197,14 @@
             {
                 "command": "/看答案",
                 "description": "查看答案"
+            },
+            {
+                "command": "/随蓝排行榜",
+                "description": "查看本群随蓝累计排行榜"
+            },
+            {
+                "command": "/结束随蓝",
+                "description": "结束本群正在进行的随蓝游戏"
             }
         ]
     },

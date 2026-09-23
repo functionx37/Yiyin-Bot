@@ -10,6 +10,7 @@ dependencies = [
     "nb-cli>=1.4.2",
     "python-dotenv>=1.0.0",
     "jieba>=0.42.1",
+    "pypinyin>=0.53.0",
     "pillow>=12.1.1",
     "nonebot-plugin-memes>=0.8.1",
     "nonebot-plugin-orm[default]>=0.8.3",

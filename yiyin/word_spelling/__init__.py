@@ -1,15 +1,12 @@
 """
 NoneBot2 word拼词插件
-- 当前指令：/dqxm [n]、/ccb [n]
-- 新增通用指令：/拼 <声母序列> [n]
-- 规则：按命令规则从拼音字库随机取字拼词
-- 扩展：通过 WORD_RULES 配置可继续新增同类指令
+- 指令：/拼 <声母序列> [n]
+- 规则：按声母序列从拼音字库随机取字拼词
 """
 
 import json
 import random
 from pathlib import Path
-from typing import TypedDict
 
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
@@ -21,21 +18,6 @@ PINYIN_DIR = PROJECT_ROOT / "assets" / "documents" / "pinyin"
 MAX_COUNT = 100
 DIRECT_SEND_THRESHOLD = 10
 CHUNK_SIZE = 10
-
-
-class WordRule(TypedDict):
-    pinyin_slots: list[str | list[str]]
-
-
-# 可扩展规则：新增指令时只需补充配置项并注册 matcher
-WORD_RULES: dict[str, WordRule] = {
-    "dqxm": {
-        "pinyin_slots": ["d", "q", "x", "m"],
-    },
-    "ccb": {
-        "pinyin_slots": [["c", "ch"], ["c", "ch"], "b"],
-    }
-}
 
 _PINYIN_CACHE: dict[str, list[str]] = {}
 _AVAILABLE_PINYIN_KEYS = sorted(
@@ -123,17 +105,17 @@ def _generate_word(pinyin_slots: list[str | list[str]]) -> str:
     return "".join(chars)
 
 
-def _parse_count(args_text: str, command: str) -> tuple[int | None, str | None]:
+def _parse_count(args_text: str) -> tuple[int | None, str | None]:
     if not args_text:
         return 1, None
 
     try:
         count = int(args_text)
     except ValueError:
-        return None, f"参数 n 必须是整数，用法：/{command} [n]"
+        return None, "参数 n 必须是整数，用法：/拼 <声母序列> [n]"
 
     if count <= 0:
-        return None, f"参数 n 必须大于 0，用法：/{command} [n]"
+        return None, "参数 n 必须大于 0，用法：/拼 <声母序列> [n]"
 
     if count > MAX_COUNT:
         count = MAX_COUNT
@@ -154,7 +136,7 @@ def _parse_dynamic_command_args(args_text: str) -> tuple[list[str | list[str]] |
     if error:
         return None, None, error
 
-    count, error = _parse_count(count_text, "拼")
+    count, error = _parse_count(count_text)
     if error:
         return None, None, error
 
@@ -195,22 +177,6 @@ async def _send_words(
     await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
 
 
-def _register_word_command(command: str):
-    matcher = on_command(command, priority=10, block=True)
-    rule = WORD_RULES[command]
-
-    @matcher.handle()
-    async def _handle(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
-        count, error = _parse_count(args.extract_plain_text().strip(), command)
-        if error:
-            await matcher.finish(error)
-        assert count is not None
-
-        words = [_generate_word(rule["pinyin_slots"]) for _ in range(count)]
-        await _send_words(bot, event, words)
-        await matcher.finish()
-
-
 spell_matcher = on_command("拼", priority=10, block=True)
 
 
@@ -233,6 +199,5 @@ async def _handle_spell_command(
     await spell_matcher.finish()
 
 
-for _command in WORD_RULES:
-    _register_word_command(_command)
-
+# 注册 dqxm 子指令
+from yiyin.word_spelling import dqxm  # noqa: E402, F401

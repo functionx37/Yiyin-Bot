@@ -1,6 +1,5 @@
 {
   "base_plugin": {
-    "yiyin.blacklist": "黑名单",
     "yiyin.chain.dinner": "吃饭接龙",
     "yiyin.chain.ktv": "KTV接龙",
     "yiyin.choose": "随机选择",

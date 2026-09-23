@@ -16,7 +16,6 @@ from nonebot.rule import Rule
 
 from yiyin.food import add_food_from_image_url
 from yiyin.food.llm_recognition import recognize_food_from_image_bytes
-from yiyin.image_utils import maybe_compress_large_png
 from yiyin.toggle import is_feature_enabled_async
 
 # ==================== 配置 ====================
@@ -83,12 +82,6 @@ async def _fetch_image_info(
             or len(content) >= 6 and content[:6] in _GIF_MAGIC
             or "gif" in (content_type or "").lower()
         )
-        if not is_gif and content:
-            content, content_type, _ = maybe_compress_large_png(
-                content,
-                content_type,
-                log_prefix="自动食物收集预压缩",
-            )
         return is_gif, content, content_type
     except Exception:
         logger.debug("图片下载检测失败: {}", url[:80])

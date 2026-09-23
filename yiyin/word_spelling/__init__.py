@@ -15,8 +15,6 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 
-from yiyin.word_spelling.explain import explain_dqxm_word
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PINYIN_DIR = PROJECT_ROOT / "assets" / "documents" / "pinyin"
 
@@ -181,52 +179,20 @@ def _build_forward_nodes(bot_name: str, bot_uin: str, words: list[str]) -> list[
     return nodes
 
 
-def _extract_message_id(response) -> int | None:
-    """从 OneBot 发送结果中提取 message_id。"""
-    if not isinstance(response, dict):
-        return None
-    message_id = response.get("message_id")
-    if message_id is not None:
-        return int(message_id)
-    data = response.get("data")
-    if isinstance(data, dict) and data.get("message_id") is not None:
-        return int(data["message_id"])
-    return None
-
-
 async def _send_words(
     bot: Bot,
     event: GroupMessageEvent,
     words: list[str],
-) -> int | None:
+) -> None:
     if len(words) <= DIRECT_SEND_THRESHOLD:
-        response = await bot.send(event, "\n".join(words))
-        return _extract_message_id(response)
+        await bot.send(event, "\n".join(words))
+        return
 
     bot_info = await bot.get_login_info()
     bot_name = bot_info.get("nickname", "YiyinBot")
     bot_uin = str(bot.self_id)
     nodes = _build_forward_nodes(bot_name, bot_uin, words)
-    response = await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
-    return _extract_message_id(response)
-
-
-async def _send_dqxm_explanation(
-    bot: Bot,
-    event: GroupMessageEvent,
-    words: list[str],
-    sent_message_id: int | None,
-) -> None:
-    """为 /dqxm 生成的单个词语补充一本正经胡说八道式解释。"""
-    if len(words) != 1 or sent_message_id is None:
-        return
-
-    explanation = await explain_dqxm_word(words[0])
-    if not explanation:
-        return
-
-    reply_msg = MessageSegment.reply(sent_message_id) + MessageSegment.text(explanation)
-    await bot.send(event, reply_msg)
+    await bot.send_group_forward_msg(group_id=event.group_id, messages=nodes)
 
 
 def _register_word_command(command: str):
@@ -241,9 +207,7 @@ def _register_word_command(command: str):
         assert count is not None
 
         words = [_generate_word(rule["pinyin_slots"]) for _ in range(count)]
-        sent_message_id = await _send_words(bot, event, words)
-        if command == "dqxm":
-            await _send_dqxm_explanation(bot, event, words, sent_message_id)
+        await _send_words(bot, event, words)
         await matcher.finish()
 
 

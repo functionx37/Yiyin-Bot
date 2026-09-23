@@ -184,6 +184,16 @@ def _load_help_text() -> str:
     return "贴表情模块帮助信息未找到"
 
 
+def _build_alias_table(config: dict[str, Any]) -> str:
+    """构建 别名 → 表情ID 对照表文本。"""
+    alias_map = config["alias"]
+    if not alias_map:
+        return "『表情别名对照表』\n\n暂无别名，可用 /贴表情别名 <ID> <别名> 绑定"
+    lines = ["『表情别名对照表』", ""]
+    lines.extend(f"  {alias} → {emoji_id}" for alias, emoji_id in alias_map.items())
+    return "\n".join(lines)
+
+
 def _make_node(name: str, uin: str, content: Message) -> dict:
     return {
         "type": "node",
@@ -598,7 +608,11 @@ async def handle_emoji_list(bot: Bot, event: GroupMessageEvent):
     help_text = _load_help_text()
     nodes.append(_make_node(bot_name, bot_uin, Message(MessageSegment.text(help_text))))
 
-    # 第二条：表情预览图片
+    # 第二条：别名 → 表情ID 对照表
+    alias_text = _build_alias_table(_load_config())
+    nodes.append(_make_node(bot_name, bot_uin, Message(MessageSegment.text(alias_text))))
+
+    # 第三条：表情预览图片
     preview_msg = Message(MessageSegment.text("以下为部分表情预览，仅供参考\n"))
     for img_file in sorted(EMOJI_IMG_DIR.glob("*.png")):
         preview_msg += MessageSegment.image(img_file.read_bytes())

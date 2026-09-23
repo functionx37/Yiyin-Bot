@@ -37,7 +37,6 @@ from yiyin.food.llm_recognition import (
     recognize_food_from_image_bytes,
     suggest_food_name_from_image_bytes,
 )
-from yiyin.image_utils import maybe_compress_large_png
 
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -418,12 +417,7 @@ def _render_feast_collage(
 
     output = BytesIO()
     canvas.convert("RGB").save(output, format="PNG", optimize=True)
-    image_bytes, _, _ = maybe_compress_large_png(
-        output.getvalue(),
-        "image/png",
-        log_prefix="吃大餐拼图",
-    )
-    return image_bytes
+    return output.getvalue()
 
 
 def _get_food_entry_context(
@@ -933,13 +927,8 @@ async def _download_food_images(
                 resp.raise_for_status()
                 short_id = _generate_short_id(existing_ids)
                 existing_ids.add(short_id)
-                image_bytes, content_type, _ = maybe_compress_large_png(
-                    resp.content,
-                    resp.headers.get("content-type"),
-                    log_prefix=f"食物图片压缩[{short_id}]",
-                )
                 downloaded.append(
-                    (short_id, image_bytes, content_type)
+                    (short_id, resp.content, resp.headers.get("content-type"))
                 )
             except Exception:
                 logger.exception(f"下载食物图片失败: {url}")

@@ -28,8 +28,6 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, Message
 from nonebot.params import CommandArg
 from nonebot.permission import SUPERUSER
 
-from yiyin.image_utils import maybe_compress_large_png
-
 # ==================== 数据路径 ====================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data" / "quotes"
@@ -588,12 +586,7 @@ async def _do_upload(
                 resp.raise_for_status()
                 short_id = _generate_short_id(existing_ids)
                 existing_ids.add(short_id)
-                content, _, _ = maybe_compress_large_png(
-                    resp.content,
-                    resp.headers.get("content-type"),
-                    log_prefix=f"语录图片压缩[{short_id}]",
-                )
-                downloaded.append((short_id, content))
+                downloaded.append((short_id, resp.content))
             except Exception:
                 logger.exception(f"下载语录图片失败: {url}")
                 if auto_registered:
@@ -829,11 +822,6 @@ async def handle_screenshot_upload(
     index = _load_index(group_id)
     short_id = _generate_short_id(set(index.keys()))
     try:
-        screenshot_bytes, _, _ = maybe_compress_large_png(
-            screenshot_bytes,
-            "image/png",
-            log_prefix=f"语录截图压缩[{short_id}]",
-        )
         index[short_id] = {"member": canonical, "filename": f"{short_id}.png"}
         filepath = image_dir / _quote_filename(short_id, index[short_id])
         filepath.write_bytes(screenshot_bytes)

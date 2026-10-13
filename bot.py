@@ -39,5 +39,8 @@ driver.register_adapter(OneBotV11Adapter)
 
 nonebot.load_from_toml("pyproject.toml")
 
+from resource_guard.integrations import install
+install()
+
 if __name__ == "__main__":
     nonebot.run()

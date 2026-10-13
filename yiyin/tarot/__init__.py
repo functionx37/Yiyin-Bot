@@ -1,3 +1,4 @@
+from resource_guard import render_bytes, ResourceBusy
 """
 NoneBot2 塔罗牌插件
 - 命令：/抽塔罗牌  — 随机抽取大阿卡纳塔罗牌（0-21），随机正位/逆位，发送图文消息
@@ -46,18 +47,10 @@ async def handle_tarot(bot: Bot, event: MessageEvent):
 
     # 3. 处理图片
     image_path = TAROT_IMAGE_DIR / f"{card_id}.png"
-    img = Image.open(image_path)
-
-    if not is_upright:
-        # 逆位：旋转 180 度
-        img = img.rotate(180)
-
-    # 将图片写入内存缓冲区，转为 base64 发送
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    image_bytes = buf.getvalue()
-    img.close()
+    try:
+        image_bytes = await render_bytes('tarot', {'path': image_path, 'upright': is_upright})
+    except ResourceBusy as error:
+        await tarot_cmd.finish(str(error))
 
     # 4. 构建消息
     # @调用者

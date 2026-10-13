@@ -115,6 +115,15 @@ check_and_update_repo() {
   echo "代码更新完成。"
 }
 
+if systemctl cat yiyin-bot.service >/dev/null 2>&1; then
+  if ! systemctl is-active --quiet yiyin-bot.service; then
+    check_and_update_repo
+  fi
+  sudo -n systemctl start yiyin.target
+  echo "已启动 Bot 和 NapCat 系统服务；按 Ctrl+C 退出日志查看，服务继续运行。"
+  exec sudo -n journalctl -f -u yiyin-bot.service -u yiyin-napcat.service
+fi
+
 require_command tmux
 require_command uv
 require_command napcat

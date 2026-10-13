@@ -12,6 +12,12 @@ usage() {
 
 [[ "${1:-}" =~ ^(-h|--help)$ ]] && { usage; exit 0; }
 
+if systemctl cat yiyin-bot.service >/dev/null 2>&1; then
+  sudo -n systemctl stop yiyin.target
+  echo "已停止 Bot 和 NapCat 系统服务"
+  exit 0
+fi
+
 if ! command -v tmux >/dev/null 2>&1; then
   echo "错误: 未找到命令: tmux" >&2
   exit 1

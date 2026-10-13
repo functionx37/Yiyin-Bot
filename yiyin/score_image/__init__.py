@@ -1,3 +1,4 @@
+from resource_guard import render_bytes, gate
 """
 NoneBot2 成绩图处理插件
 - /<类别> [图片]：使用大模型为游戏成绩图添加对应风格的特效
@@ -49,6 +50,7 @@ def _extract_image_url(msg: Message) -> str | None:
 
 
 async def _download_image(url: str) -> bytes:
+    gate.budget()
     async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -160,7 +162,7 @@ async def handle_bw(bot: Bot, event: GroupMessageEvent, args: Message = CommandA
 
     try:
         image_bytes = await _download_image(image_url)
-        result = _to_grayscale(image_bytes)
+        result = await render_bytes('grayscale', {'image_bytes': image_bytes})
     except Exception as e:
         logger.exception(f"黑白图片处理失败: {e}")
         await bw_cmd.finish(f"处理失败：{e}")

@@ -19,9 +19,9 @@ usage() {
   sudo ./scripts/yiyin install /usr/local/bin/yiyin
 
 说明:
-  run    启动前检查远端更新，再启动 bot 和 napcat 的 tmux 会话
-  stop   停止该 tmux 会话
-  status 查看该 tmux 会话是否存在
+  run    启动 bot 和 napcat 系统服务并查看日志（未安装服务时使用 tmux）
+  stop   停止 bot 和 napcat
+  status 查看 bot 和 napcat 状态
   push   推送 data/ 到远程
   pull   从远程拉取 data/
   diff   预览本地与远程的 data/ 差异
@@ -71,6 +71,10 @@ case "$COMMAND" in
     exec "$SCRIPT_DIR/yiyin-stop.sh"
     ;;
   status)
+    if systemctl cat yiyin-bot.service >/dev/null 2>&1; then
+      systemctl --no-pager --full status yiyin-bot.service yiyin-napcat.service
+      exit $?
+    fi
     SESSION_NAME="${YIYIN_TMUX_SESSION:-yiyin}"
     if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
       echo "运行中: $SESSION_NAME"

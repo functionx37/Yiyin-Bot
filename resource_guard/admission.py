@@ -35,7 +35,19 @@ def cgroup_headroom():
         try:
             maximum = (current / 'memory.max').read_text().strip()
             if maximum != 'max':
-                free.append(max(0, int(maximum) - int((current / 'memory.current').read_text())))
+                usage = int((current / 'memory.current').read_text())
+                # memory.current includes file cache. Credit only half of clean,
+                # inactive file pages; never credit anonymous or active memory.
+                reclaimable = 0
+                try:
+                    stats = dict(line.split() for line in (current / 'memory.stat').read_text().splitlines())
+                    clean = max(0, int(stats.get('inactive_file', 0))
+                                - int(stats.get('file_dirty', 0))
+                                - int(stats.get('file_writeback', 0)))
+                    reclaimable = min(usage, clean) // 2
+                except (OSError, ValueError):
+                    pass  # Missing statistics retain the original strict budget.
+                free.append(max(0, int(maximum) - usage + reclaimable))
         except OSError:
             pass
         current = current.parent

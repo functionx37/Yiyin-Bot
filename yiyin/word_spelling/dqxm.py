@@ -35,11 +35,10 @@ DQXM_JSON_PATH = PROJECT_ROOT / "assets" / "documents" / "dqxm.json"
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-flash"
-DEEPSEEK_TIMEOUT = 90
+DEEPSEEK_TIMEOUT = 180
 
 MAX_TEXT_LENGTH = 1200  # 送入 LLM 的聊天内容截断长度
 MAX_WORDS = 5  # 最多展示的词组数
-MAX_TOKENS = 800
 
 # 汉字（基本区+扩展A+兼容区）；词组仅允许汉字与英文字母
 _WORD_CHARS_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffA-Za-z]+")
@@ -294,12 +293,12 @@ async def _deepseek_chat(system: str, user: str) -> str | None:
 
     payload = {
         "model": DEEPSEEK_MODEL,
+        "thinking": {"type": "enabled"},
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
         "temperature": 1.3,
-        "max_tokens": MAX_TOKENS,
         "stream": False,
     }
     headers = {
@@ -323,11 +322,30 @@ async def _deepseek_chat(system: str, user: str) -> str | None:
         return None
 
     try:
-        content = resp.json()["choices"][0]["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError):
+        data = resp.json()
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
+        finish_reason = choice.get("finish_reason")
+        usage = data.get("usage") or {}
+        completion_tokens = usage.get("completion_tokens")
+        reasoning_tokens = (usage.get("completion_tokens_details") or {}).get(
+            "reasoning_tokens"
+        )
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
         logger.warning("dqxm: DeepSeek 响应解析失败: {}", resp.text[:300])
         return None
-    return content if isinstance(content, str) else None
+
+    logger.info(
+        "dqxm: DeepSeek 返回 finish_reason={} completion_tokens={} reasoning_tokens={}",
+        finish_reason, completion_tokens, reasoning_tokens,
+    )
+    if finish_reason == "length":
+        logger.warning("dqxm: DeepSeek 输出达到接口默认额度，被截断")
+        return None
+    if not isinstance(content, str) or not content.strip():
+        logger.warning("dqxm: DeepSeek 最终回复为空，finish_reason={}", finish_reason)
+        return None
+    return content
 
 
 def _build_user_prompt(

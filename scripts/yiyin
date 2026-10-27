@@ -19,7 +19,7 @@ usage() {
   sudo ./scripts/yiyin install /usr/local/bin/yiyin
 
 说明:
-  run    启动 bot 和 napcat 系统服务并查看日志（未安装服务时使用 tmux）
+  run    进入 tmux：左侧 Bot 系统服务日志，右侧普通 NapCat 管理界面
   stop   停止 bot 和 napcat
   status 查看 bot 和 napcat 状态
   push   推送 data/ 到远程
@@ -65,15 +65,18 @@ COMMAND="${1:-}"
 
 case "$COMMAND" in
   run)
-    exec "$SCRIPT_DIR/yiyin-run.sh"
+    shift
+    exec "$SCRIPT_DIR/yiyin-run.sh" "$@"
     ;;
   stop)
     exec "$SCRIPT_DIR/yiyin-stop.sh"
     ;;
   status)
     if systemctl cat yiyin-bot.service >/dev/null 2>&1; then
-      systemctl --no-pager --full status yiyin-bot.service yiyin-napcat.service
-      exit $?
+      systemctl --no-pager --full status yiyin-bot.service || true
+    fi
+    if command -v napcat >/dev/null 2>&1; then
+      napcat status "${YIYIN_NAPCAT_QQ:-2676330589}"
     fi
     SESSION_NAME="${YIYIN_TMUX_SESSION:-yiyin}"
     if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then

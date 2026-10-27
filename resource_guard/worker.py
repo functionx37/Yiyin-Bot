@@ -17,6 +17,9 @@ def decode(value):
 
 
 def execute(operation, payload, budget):
+    if operation=='image_processing':
+        from resource_guard.renderers.image_processing import process_image
+        return process_image(payload['source'],payload['action'],payload['parameter'],budget)
     if operation=='symmetric':
         from PIL import Image
         from resource_guard.renderers.symmetric import _process_animated,_process_static,estimate_memory

@@ -13,6 +13,7 @@ from nonebot import on_message
 from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.rule import Rule
+from resource_guard import ImageJob, ResourceBusy, gate
 
 from yiyin.food import add_food_from_image_url
 from yiyin.food.llm_recognition import recognize_food_from_image_bytes
@@ -69,13 +70,23 @@ async def _fetch_image_info(
     返回 (is_gif, content, content_type)。
     """
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
-            resp = await client.get(url)
-        if resp.status_code != 200:
-            return False, None, None
-        content = resp.content
-        content_type = resp.headers.get("content-type")
-        disp = resp.headers.get("content-disposition", "").lower()
+        # Share the image-task slot and bound the body before buffering it.
+        async with ImageJob() as job:
+            limit = min(8 * 1024**2, job.budget // 4)
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+                async with client.stream('GET', url) as resp:
+                    if resp.status_code != 200:
+                        return False, None, None
+                    content_type = resp.headers.get("content-type")
+                    disp = resp.headers.get("content-disposition", "").lower()
+                    content = bytearray()
+                    async for chunk in resp.aiter_bytes(64 * 1024):
+                        gate.budget()
+                        if len(content) + len(chunk) > limit:
+                            logger.debug("自动食物收集跳过超出下载预算的图片")
+                            return False, None, None
+                        content.extend(chunk)
+                    content = bytes(content)
         is_gif = (
             ".gif" in url.lower()
             or "filename=" in disp and ".gif" in disp
@@ -83,6 +94,9 @@ async def _fetch_image_info(
             or "gif" in (content_type or "").lower()
         )
         return is_gif, content, content_type
+    except ResourceBusy:
+        logger.debug("自动食物收集因图片资源预算不足静默跳过")
+        return False, None, None
     except Exception:
         logger.debug("图片下载检测失败: {}", url[:80])
         return False, None, None
@@ -103,6 +117,13 @@ async def _should_handle_auto_collect(bot: Bot, event: GroupMessageEvent) -> boo
     if not _has_image_no_face(event):
         return False
     if not await _auto_collect_enabled(bot, event):
+        return False
+
+    # This is unsolicited background work: skip quietly before downloading.
+    try:
+        gate.budget()
+    except ResourceBusy:
+        logger.debug("自动食物收集因图片资源预算不足静默跳过")
         return False
 
     image_seg = _first_image_segment(event)

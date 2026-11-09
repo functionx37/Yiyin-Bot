@@ -1,0 +1,22 @@
+# Copy to yiyin-official.service and fill in the deployment values below.
+# Replace YOUR_LINUX_USER and /absolute/path/to/Yiyin-Bot-Official before use.
+
+[Unit]
+Description=Yiyin Official QQ Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_LINUX_USER
+WorkingDirectory=/absolute/path/to/Yiyin-Bot-Official
+ExecStart=/absolute/path/to/Yiyin-Bot-Official/.venv/bin/python bot.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

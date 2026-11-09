@@ -1,0 +1,34 @@
+# Dependencies / Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.uv-cache/
+
+# All credentials stay local; only the example belongs in Git.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local deployment configuration (keep the .example template in Git).
+config/yiyin-official.service
+
+# Runtime data
+data/
+*.log
+
+# Editors / OS
+.codex/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Tests
+tests/

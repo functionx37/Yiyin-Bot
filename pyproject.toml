@@ -1,0 +1,15 @@
+[project]
+name = "yiyin-official"
+version = "0.1.0"
+description = "Yiyin Bot on the official QQ platform over WebSocket"
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "nonebot2[httpx,websockets]>=2.5.0,<3",
+    "nonebot-adapter-qq==1.7.3",
+    "python-dotenv>=1.0,<2",
+    "pillow>=12.1.1,<13",
+]
+
+[tool.nonebot]
+plugin_dirs = ["yiyin"]

@@ -1,7 +1,7 @@
 """
 自动食物收集（food 子模块，隐藏功能，需 /启用 自动食物收集）
 - 对启用了该功能的群聊，自动识别每条消息中的食物图片
-- 调用 LLM 判断图片是否为食物，并给出简短名称后自动收集到食物图鉴（名称仅供参考，可用 /补充名字 调整）
+- 调用 DeepSeek 视觉模型判断图片是否为食物，并给出简短名称后自动收集到食物图鉴（名称仅供参考，可用 /补充名字 调整）
 - 常关，需群内 /启用 自动食物收集 后生效
 """
 
@@ -175,6 +175,7 @@ async def handle_auto_collect(bot: Bot, event: GroupMessageEvent):
         image_bytes,
         content_type,
         log_prefix="自动食物收集",
+        use_deepseek=True,
     )
 
     if rec_type == "FOOD":

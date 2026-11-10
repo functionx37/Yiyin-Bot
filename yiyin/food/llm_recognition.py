@@ -6,12 +6,17 @@
 
 import asyncio
 import base64
+import os
+
+import httpx
 
 from nonebot.log import logger
 
 from yiyin.llmapi import ChatCompletionTransportError, chat_completion
 
 IMAGE_RECOG_MODEL = "gpt-5.6-luna"
+DEEPSEEK_FOOD_MODEL = "deepseek-flash"
+DEEPSEEK_FOOD_URL = "https://api.deepseek.com/chat/completions"
 
 FOOD_PROMPT = """你是一个严格的图片分类器，你需要判断图本身是不是一张真实食物的实拍照片。只看图片内容，按以下规则回复，且只回复一行，不要有任何其他文字。
 
@@ -61,11 +66,60 @@ def parse_food_llm_response(text: str | None) -> tuple[str, str | None]:
     return "OTHER", None
 
 
+async def _deepseek_food_completion(messages: list[dict]) -> str | None:
+    """自动收集专用的 DeepSeek 视觉调用，使用已有独立密钥。"""
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if not api_key:
+        logger.warning("自动食物收集: 未配置 DEEPSEEK_API_KEY")
+        return None
+
+    payload = {
+        "model": DEEPSEEK_FOOD_MODEL,
+        # 分类只需一行结果；关闭思考，避免思考耗尽输出额度。
+        "thinking": {"type": "disabled"},
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": 64,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(90, connect=15, write=180, pool=15)
+        ) as client:
+            resp = await client.post(
+                DEEPSEEK_FOOD_URL,
+                json=payload,
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.HTTPError as e:
+        raise ChatCompletionTransportError(
+            f"DeepSeek {type(e).__name__}: {e}"
+        ) from e
+
+    if resp.status_code != 200:
+        logger.warning("自动食物收集: DeepSeek 非 200: status={}", resp.status_code)
+        return None
+    try:
+        choice = resp.json()["choices"][0]
+        content = choice["message"]["content"]
+        finish_reason = choice.get("finish_reason")
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        logger.warning("自动食物收集: DeepSeek 响应格式异常")
+        return None
+    if finish_reason != "stop":
+        logger.warning("自动食物收集: DeepSeek 输出未完成: {}", finish_reason)
+        return None
+    if not isinstance(content, str) or not content.strip():
+        return None
+    return content.strip()
+
+
 async def recognize_food_from_image_bytes(
     image_bytes: bytes,
     content_type: str | None,
     *,
     log_prefix: str = "食物识别",
+    use_deepseek: bool = False,
 ) -> tuple[str, str | None]:
     messages = [
         {
@@ -82,15 +136,18 @@ async def recognize_food_from_image_bytes(
     reply: str | None = None
     for attempt in range(2):
         try:
-            reply = await chat_completion(
-                messages,
-                model=IMAGE_RECOG_MODEL,
-                temperature=0.1,
-                max_tokens=64,
-                top_p=None,
-                timeout=90,
-                raise_on_error=True,
-            )
+            if use_deepseek:
+                reply = await _deepseek_food_completion(messages)
+            else:
+                reply = await chat_completion(
+                    messages,
+                    model=IMAGE_RECOG_MODEL,
+                    temperature=0.1,
+                    max_tokens=64,
+                    top_p=None,
+                    timeout=90,
+                    raise_on_error=True,
+                )
             if reply:
                 break
             logger.warning(

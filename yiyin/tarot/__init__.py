@@ -32,7 +32,7 @@ TarotEvent = C2CMessageCreateEvent | GroupMessageCreateEvent
 tarot = on_command("抽塔罗牌", priority=10, block=True)
 _recent: OrderedDict[tuple[str, str, str], float] = OrderedDict()
 _no_keyboard: set[str] = set()
-CARD_WIDTH = 180
+CARD_DISPLAY_WIDTH = 180
 
 
 @dataclass(frozen=True)
@@ -59,19 +59,14 @@ def draw_card(card_id: int | None = None, upright: bool | None = None) -> Draw:
     card = DECK[card_id]
     image_bytes = (ROOT / f"assets/images/tarot/{card_id}.png").read_bytes()
     with Image.open(BytesIO(image_bytes)) as image:
-        size = (CARD_WIDTH, round(CARD_WIDTH * image.height / image.width))
-        with image.resize(size, Image.Resampling.LANCZOS) as resized:
-            if not upright:
-                with resized.transpose(Image.Transpose.ROTATE_180) as rotated, BytesIO() as output:
-                    rotated.save(output, format="PNG")
-                    image_bytes = output.getvalue()
-            else:
-                with BytesIO() as output:
-                    resized.save(output, format="PNG")
-                    image_bytes = output.getvalue()
+        size = image.size
+        if not upright:
+            with image.transpose(Image.Transpose.ROTATE_180) as rotated, BytesIO() as output:
+                rotated.save(output, format="PNG")
+                image_bytes = output.getvalue()
     return Draw(
         card_id,
-        f"【{NUMERALS[card_id]}】{card['name_zh']}（{card['name_en']}）· {'正位' if upright else '逆位'}",
+        f"【{NUMERALS[card_id]}】{card['name_zh']}（{card['name_en']}）",
         f"{'正位' if upright else '逆位'}：{card['upright' if upright else 'reversed']}",
         image_bytes,
         size,
@@ -81,7 +76,9 @@ def draw_card(card_id: int | None = None, upright: bool | None = None) -> Draw:
 def card_markdown(event: TarotEvent, card: Draw, image_url: str) -> str:
     caller = (f'<qqbot-at-user id="{event.author.member_openid}" /> '
               if isinstance(event, GroupMessageCreateEvent) else "你")
-    width, height = card.size
+    # Keep the uploaded image at full resolution; only shrink its display size.
+    width = CARD_DISPLAY_WIDTH
+    height = round(width * card.size[1] / card.size[0])
     meaning = "\n".join(f"> {line}" for line in card.meaning.splitlines())
     return (f"{caller}抽到了：\n\n**{card.title}**\n\n"
             f"![塔罗牌 #{width}px #{height}px]({image_url})\n\n{meaning}")

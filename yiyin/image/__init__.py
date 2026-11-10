@@ -129,12 +129,10 @@ async def send_image(bot: Bot, event: ImageEvent, result: Result):
               "file_data": b64encode(result.data).decode("ascii"), "srv_send_msg": False}, timeout=30,
     ))
     event._reply_seq += 1
-    reference = reference_message(event).data["reference"]
     await bot._request(Request(
         "POST", bot.adapter.get_api_base().joinpath("v2", scene, openid, "messages"),
-        json={"msg_type": 7, "content": "处理完成", "media": {"file_info": uploaded["file_info"]},
-              "msg_id": event.id, "msg_seq": event._reply_seq,
-              "message_reference": {"message_id": reference.message_id}},
+        json={"msg_type": 7, "media": {"file_info": uploaded["file_info"]},
+              "msg_id": event.id, "msg_seq": event._reply_seq},
     ))
 
 

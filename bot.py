@@ -116,6 +116,8 @@ def initialize() -> Driver:
         raise RuntimeError("选择插件加载失败，请检查启动日志。")
     if nonebot.get_plugin_by_module_name("yiyin.image") is None:
         raise RuntimeError("图片插件加载失败，请检查启动日志。")
+    if nonebot.get_plugin_by_module_name("yiyin.meme") is None:
+        raise RuntimeError("表情包插件加载失败，请检查模板、字体及启动日志。")
 
     return driver
 

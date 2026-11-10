@@ -1,12 +1,53 @@
-"""Bounded static/animated transforms, imported only by disposable workers."""
+"""Static and animated image transforms used directly by the image plugin."""
 from bisect import bisect_right
 from io import BytesIO
 from math import ceil, hypot
-from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from .symmetric import MAX_GIF_FRAMES, MAX_IMAGE_PIXELS, _apply_symmetric
+MAX_IMAGE_PIXELS = 4_000_000
+MAX_GIF_FRAMES = 100
+
+
+def _apply_symmetric(img: Image.Image, direction: str) -> Image.Image:
+    w, h = img.size
+
+    if direction == "左":
+        half = w // 2
+        left = img.crop((0, 0, half, h))
+        mirrored = left.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        result = Image.new(img.mode, (half * 2, h))
+        result.paste(left, (0, 0))
+        result.paste(mirrored, (half, 0))
+
+    elif direction == "右":
+        half = w // 2
+        right = img.crop((w - half, 0, w, h))
+        mirrored = right.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        result = Image.new(img.mode, (half * 2, h))
+        result.paste(mirrored, (0, 0))
+        result.paste(right, (half, 0))
+
+    elif direction == "上":
+        half = h // 2
+        top = img.crop((0, 0, w, half))
+        mirrored = top.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        result = Image.new(img.mode, (w, half * 2))
+        result.paste(top, (0, 0))
+        result.paste(mirrored, (0, half))
+
+    elif direction == "下":
+        half = h // 2
+        bottom = img.crop((0, h - half, w, h))
+        mirrored = bottom.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        result = Image.new(img.mode, (w, half * 2))
+        result.paste(mirrored, (0, 0))
+        result.paste(bottom, (0, half))
+
+    else:
+        result = img.copy()
+
+    return result
 
 SPIN_PERIOD_MS = 2000
 SPIN_FRAME_MS = 50
@@ -26,15 +67,6 @@ def _size(width, height, spin):
     if spin:
         ratio = min(ratio, SPIN_MAX_SIDE / max(width, height))
     return max(1, int(width * ratio)), max(1, int(height * ratio))
-
-
-def estimate_memory(width, height, frames, file_size, action):
-    w, h = _size(width, height, action == 'spin')
-    output_pixels = (ceil(hypot(w, h)) + 2) ** 2 if action == 'spin' else w * h
-    output_frames = MAX_GIF_FRAMES if action == 'spin' else frames
-    # Source decoder, retained RGBA frames, transformed frames and GIF palettes.
-    return (48 * 1024**2 + width * height * 16 + w * h * (12 + frames * 4)
-            + output_pixels * (12 + output_frames * 6) + file_size * 4)
 
 
 def _duration(frame):
@@ -132,7 +164,7 @@ def _transform(frame, action, parameter):
     return frame.copy()
 
 
-def process_image(source, action, parameter, budget):
+def process_image(source, action, parameter):
     if action not in PARAMETERS or parameter not in PARAMETERS[action]:
         raise ValueError('图片处理参数不正确，请发送 /图片处理 查看用法')
     frames, output_frames = [], []
@@ -144,8 +176,6 @@ def process_image(source, action, parameter, budget):
                 raise ValueError(f'动图帧数过多（{count} 帧，上限 {MAX_GIF_FRAMES} 帧），请使用更短的动图')
             if action in ANIMATED_ONLY and count <= 1:
                 raise ValueError('这个指令仅支持动图，请附带或回复一张动图')
-            if estimate_memory(*image.size, count, Path(source).stat().st_size, action) > budget:
-                raise ValueError('这张图片预计需要的内存超过当前可用额度，请稍后重试')
             loop = image.info.get('loop')
             size = _size(*image.size, action == 'spin')
             durations = []

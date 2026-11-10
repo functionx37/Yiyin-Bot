@@ -1,11 +1,16 @@
 """图片处理：对称、动图倒放/变速、翻转、固定角度转向和连续旋转。"""
-from nonebot import on_command
+import asyncio
+from inspect import getclosurevars, isfunction
+from io import BytesIO
+
+import httpx
+from nonebot import get_driver, on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageEvent, MessageSegment
 from nonebot.log import logger
 from nonebot.matcher import Matcher
 from nonebot.params import CommandArg
 
-from resource_guard import ImageJob, ResourceBusy
+from .render import process_image
 
 COMMANDS = {
     '对称': ('symmetric', '左', {'左', '右', '上', '下'}),
@@ -55,18 +60,18 @@ def _make_handler(command):
         if not url:
             await matcher.finish(f'请附带图片或回复一张图片，例如：/{command} [图片]\n发送 /图片处理 查看完整用法')
         try:
-            async with ImageJob() as job:
-                source = await job.download(url)
-                output = await job.render('image_processing', {
-                    'source': source, 'action': action, 'parameter': parameter,
-                })
-                await matcher.send(MessageSegment.image(output.as_uri()))
-        except ResourceBusy as error:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+            output = await asyncio.to_thread(
+                process_image, BytesIO(response.content), action, parameter,
+            )
+        except ValueError as error:
             await matcher.finish(str(error))
         except Exception:
             logger.exception('图片处理或发送失败：{}', command)
             await matcher.finish('图片处理或发送失败，请稍后重试')
-        await matcher.finish()
+        await matcher.finish(MessageSegment.image(output))
     return handle
 
 
@@ -82,3 +87,32 @@ image_help_cmd = on_command('图片处理', priority=10, block=True)
 @image_help_cmd.handle()
 async def handle_image_help():
     await image_help_cmd.finish(HELP_TEXT)
+
+
+@get_driver().on_startup
+def remove_image_command_conflicts():
+    """Let the unified feature own its command names, even while disabled."""
+    from nonebot.matcher import matchers
+    from nonebot_plugin_memes.matchers import image_operations
+    names = {'对称', '倒放', 'gif倒放', '加速', '减速', '翻转', '转', '旋转'}
+    removed = 0
+    for entries in list(matchers.values()):
+        for matcher in list(entries):
+            for handler in matcher.handlers:
+                call = handler.call
+                if not isfunction(call):
+                    continue
+                if call.__module__ not in {'nonebot_plugin_memes.matchers.command',
+                                           'nonebot_plugin_memes.matchers.image_operations'}:
+                    continue
+                captured = getclosurevars(call).nonlocals
+                command = captured.get('command')
+                meme = captured.get('meme')
+                keywords = command.keywords if command is not None else meme.info.keywords if meme is not None else ()
+                if names.intersection(keywords):
+                    matcher.destroy()
+                    removed += 1
+                    break
+    image_operations.commands[:] = [command for command in image_operations.commands
+                                     if not names.intersection(command.keywords)]
+    return removed

@@ -7,22 +7,16 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BOT_DIR="${BOT_DIR:-$PROJECT_ROOT}"
 NAPCAT_DIR="${NAPCAT_DIR:-$PROJECT_ROOT/napcat}"
 SESSION_NAME="${YIYIN_TMUX_SESSION:-yiyin}"
-NAPCAT_QQ="${YIYIN_NAPCAT_QQ:-2676330589}"
-DETACH=0
 
 usage() {
-  echo "用法: $0 [--detach]"
+  echo "用法: $0"
   echo "可选环境变量:"
   echo "  YIYIN_TMUX_SESSION  tmux 会话名，默认: yiyin"
   echo "  BOT_DIR             机器人目录，默认: $PROJECT_ROOT"
   echo "  NAPCAT_DIR          NapCat 目录，默认: $PROJECT_ROOT/napcat"
-  echo "  YIYIN_NAPCAT_QQ     NapCat QQ 账号，默认: 2676330589"
 }
 
 [[ "${1:-}" =~ ^(-h|--help)$ ]] && { usage; exit 0; }
-if [[ "${1:-}" == "--detach" ]]; then DETACH=1; shift; fi
-[[ $# -eq 0 ]] || { usage >&2; exit 1; }
-[[ "$NAPCAT_QQ" =~ ^[0-9]+$ ]] || { echo "错误: QQ 账号必须是数字" >&2; exit 1; }
 
 require_command() {
   local cmd="$1"
@@ -122,6 +116,7 @@ check_and_update_repo() {
 }
 
 require_command tmux
+require_command uv
 require_command napcat
 
 if [[ ! -d "$BOT_DIR" ]]; then
@@ -131,47 +126,24 @@ fi
 
 mkdir -p "$NAPCAT_DIR"
 
-if ! tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-  if systemctl cat yiyin-bot.service >/dev/null 2>&1; then
-    if ! systemctl is-active --quiet yiyin-bot.service; then
-      check_and_update_repo
-    fi
-    # NapCat uses its ordinary launcher, outside the Bot's resource slice.
-    if systemctl is-active --quiet yiyin-napcat.service; then
-      sudo -n systemctl stop yiyin-napcat.service
-    fi
-    sudo -n systemctl start yiyin-bot.service
-    printf -v bot_cmd 'cd %q; sudo -n journalctl -n 80 -f -u yiyin-bot.service -o cat; exec bash' "$BOT_DIR"
-  else
-    require_command uv
-    check_and_update_repo
-    printf -v bot_cmd 'cd %q && uv run bot.py; exec bash' "$BOT_DIR"
-  fi
-
-  if ! pgrep -u "$(id -u)" -f "^${HOME}/Napcat/opt/QQ/qq --no-sandbox -q ${NAPCAT_QQ}$" >/dev/null; then
-    (cd "$NAPCAT_DIR" && napcat start "$NAPCAT_QQ")
-  fi
-  printf -v napcat_cmd 'cd %q; napcat; exec bash' "$NAPCAT_DIR"
-
-  tmux new-session -d -s "$SESSION_NAME" -n main -x 160 -y 45 "$bot_cmd"
-  tmux split-window -h -t "$SESSION_NAME:main" "$napcat_cmd"
-  tmux select-layout -t "$SESSION_NAME:main" even-horizontal
-  tmux select-pane -t "$SESSION_NAME:main.0" -T 'Bot (systemd)'
-  tmux select-pane -t "$SESSION_NAME:main.1" -T 'NapCat'
-  tmux set-option -w -t "$SESSION_NAME:main" pane-border-status top
-  tmux set-option -w -t "$SESSION_NAME:main" pane-border-format '#{pane_title}'
-  tmux select-pane -t "$SESSION_NAME:main.1"
-fi
-
-echo "已启动 tmux 会话: $SESSION_NAME"
-echo "  左侧 Bot    -> systemd 实时日志"
-echo "  右侧 NapCat -> 普通 NapCat 管理界面"
-echo "分离会话请按 Ctrl+B 再按 D；停止两者请使用 yiyin stop。"
-
-if (( DETACH )) || [[ ! -t 0 || ! -t 1 ]]; then
-  echo "进入会话: tmux attach -t $SESSION_NAME"
-elif [[ -n "${TMUX:-}" ]]; then
-  exec tmux switch-client -t "$SESSION_NAME"
-else
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+  echo "tmux 会话已存在: $SESSION_NAME"
   exec tmux attach-session -t "$SESSION_NAME"
 fi
+
+check_and_update_repo
+
+printf -v bot_cmd 'cd %q && uv run bot.py' "$BOT_DIR"
+printf -v napcat_cmd 'cd %q && napcat' "$NAPCAT_DIR"
+
+tmux new-session -d -s "$SESSION_NAME" -n main "$bot_cmd"
+tmux split-window -h -t "$SESSION_NAME:main" "$napcat_cmd"
+tmux select-layout -t "$SESSION_NAME:main" even-horizontal
+tmux select-pane -t "$SESSION_NAME:main.1"
+
+echo "已启动 tmux 会话: $SESSION_NAME"
+echo "  左侧 bot    -> $BOT_DIR"
+echo "  右侧 napcat -> $NAPCAT_DIR"
+echo "正在进入 tmux，会话退出请按 Ctrl+B D"
+
+exec tmux attach-session -t "$SESSION_NAME"

@@ -31,6 +31,7 @@ data/
 .vscode/
 .DS_Store
 Thumbs.db
+AGENTS.md
 
 # Local verification files
 tests/

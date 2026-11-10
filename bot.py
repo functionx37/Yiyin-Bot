@@ -114,6 +114,8 @@ def initialize() -> Driver:
         raise RuntimeError("塔罗牌插件加载失败，请检查 assets 资源及启动日志。")
     if nonebot.get_plugin_by_module_name("yiyin.choose") is None:
         raise RuntimeError("选择插件加载失败，请检查启动日志。")
+    if nonebot.get_plugin_by_module_name("yiyin.image") is None:
+        raise RuntimeError("图片插件加载失败，请检查启动日志。")
 
     return driver
 

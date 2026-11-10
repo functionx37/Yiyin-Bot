@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew Yiyin HTTPS IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Replace YOUR_PUBLIC_IP with the certificate name used at issuance.
+ExecStart=/opt/yiyin-certbot/bin/certbot renew --quiet --cert-name YOUR_PUBLIC_IP --no-random-sleep-on-renew --deploy-hook "/usr/sbin/nginx -t && /usr/bin/systemctl reload nginx"

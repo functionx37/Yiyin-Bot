@@ -17,7 +17,9 @@ build/
 *.key
 
 # Local deployment configuration (keep the .example template in Git).
-config/yiyin-official.service
+config/*.service
+config/*.timer
+config/*.conf
 
 # Runtime data
 data/
@@ -30,5 +32,5 @@ data/
 .DS_Store
 Thumbs.db
 
-# Tests
+# Local verification files
 tests/

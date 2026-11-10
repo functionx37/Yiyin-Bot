@@ -11,7 +11,7 @@ NoneBot2 贴表情 / 发表情插件
 - 命令：/贴表情别名 <ID> <别名>     — 绑定表情别名
 - 命令：/贴表情新增 <ID.../起~止>   — 新增随机池（仅超级管理员）
 - 命令：/贴表情移除 <ID.../起~止>   — 从随机池移除（仅超级管理员）
-- 通知：自动拾取群消息贴表情事件中的 emoji_id，补充到随机池
+- 通知：仅自动拾取群消息贴表情事件中大于 1000 的 emoji_id，补充到随机池
 - 通知：任意群友对群消息贴表情 id 128514 或 182 时，机器人对该消息贴 id 387
   （依赖协议端上报 msg_emoji_like / group_msg_emoji_like，事件模型见 msg_withdraw）
 """
@@ -411,7 +411,7 @@ async def _should_handle_auto_collect_emoji(event: NoticeEvent) -> bool:
         return False
 
     emoji_id = _extract_notice_emoji_id(event)
-    if emoji_id is None:
+    if emoji_id is None or emoji_id <= 1000:
         return False
 
     config = _load_config()

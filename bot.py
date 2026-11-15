@@ -24,6 +24,7 @@ from nonebot.log import default_filter, default_format, logger
 
 class FriendAuthorCompat(FriendAuthor):
     id: str | None = None
+    bot: bool | None = None
 
 
 class GroupAuthorCompat(GroupMemberAuthor):
@@ -114,6 +115,8 @@ def initialize() -> Driver:
         raise RuntimeError("塔罗牌插件加载失败，请检查 assets 资源及启动日志。")
     if nonebot.get_plugin_by_module_name("yiyin.choose") is None:
         raise RuntimeError("选择插件加载失败，请检查启动日志。")
+    if nonebot.get_plugin_by_module_name("yiyin.react") is None:
+        raise RuntimeError("随机回复插件加载失败，请检查 assets 资源及启动日志。")
     if nonebot.get_plugin_by_module_name("yiyin.image") is None:
         raise RuntimeError("图片插件加载失败，请检查启动日志。")
     if nonebot.get_plugin_by_module_name("yiyin.meme") is None:
